@@ -1,0 +1,156 @@
+/* =========================================================================
+   Trace — "the day, printed as a receipt"
+   Lambdaforge palette (pinned): cream paper, ink, one forge-red accent.
+   Forge-red is spent only on what matters: the stamp, the focus ratio, build.
+   ========================================================================= */
+
+:root {
+  --bg:        #faf6ee;
+  --paper:     #fcf8ee;
+  --paper-edge:#f1e9d6;
+  --ink:       #1b1f23;
+  --ink-2:     #6b7178;
+  --ink-3:     #9aa0a6;
+  --rule:      #e0d7c3;
+  --rule-2:    #d3c8b0;
+  --forge:     #d8392b;
+  --forge-deep:#a8281d;
+  --idle:      #e7e0cf;
+  --track:     #3a7d5a;
+
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --slab: "Zilla Slab", Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.app { max-width: 1080px; margin: 0 auto; padding: 22px 24px 80px; }
+
+/* ---- header ---------------------------------------------------------- */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+.wordmark { font-family: var(--slab); font-weight: 700; font-size: 22px; letter-spacing: 0.14em; }
+.wordmark .d { color: var(--forge); }
+.bar-right { display: flex; align-items: center; gap: 10px; }
+
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule-2); padding: 5px 9px; cursor: pointer; background: var(--paper); }
+.status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--track); box-shadow: 0 0 0 3px rgba(58,125,90,.18); }
+.status.paused .dot { background: var(--ink-3); box-shadow: none; }
+
+.daynav { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; }
+.daynav .date { padding: 0 8px; min-width: 96px; text-align: center; }
+.daynav button { font-family: var(--mono); font-size: 13px; background: var(--paper); border: 1px solid var(--rule-2); color: var(--ink); padding: 4px 9px; cursor: pointer; }
+.daynav button:hover { border-color: var(--ink); }
+.daynav .today { margin-left: 6px; }
+
+/* ---- eyebrow labels (no decorative §) -------------------------------- */
+.eyebrow { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-3); margin: 30px 0 10px; display: flex; align-items: center; gap: 10px; }
+.eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+/* ---- hero: receipt + vitals ------------------------------------------ */
+.hero { display: grid; grid-template-columns: 400px 1fr; gap: 26px; margin-top: 20px; align-items: start; }
+@media (max-width: 820px) { .hero { grid-template-columns: 1fr; } }
+
+/* the receipt card — the signature */
+.receipt {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  box-shadow: 0 1px 0 var(--rule), 0 14px 30px -20px rgba(27,31,35,.45);
+  padding: 22px 24px 30px;
+}
+.receipt::after { /* perforated bottom edge */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -9px; height: 10px;
+  background: radial-gradient(circle at 7px -2px, transparent 7px, var(--paper) 7px) repeat-x;
+  background-size: 14px 10px;
+}
+.r-head { display: flex; align-items: baseline; justify-content: space-between; }
+.r-title { font-family: var(--slab); font-weight: 700; letter-spacing: 0.12em; font-size: 14px; }
+.r-no { font-size: 11px; color: var(--ink-3); }
+.r-rule { border: none; border-top: 1px dashed var(--rule-2); margin: 14px 0; }
+.r-rule.heavy { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--ink); height: 3px; }
+.r-line { display: flex; justify-content: space-between; padding: 3px 0; }
+.r-line .lbl { color: var(--ink-2); }
+.r-line .val { font-variant-numeric: tabular-nums; }
+.r-line.em .lbl, .r-line.em .val { color: var(--ink); font-weight: 600; }
+.r-cat { display: flex; justify-content: space-between; padding: 2px 0; font-size: 13px; }
+.r-cat.build .name, .r-cat.build .t { color: var(--forge); }
+.r-focus { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; }
+.r-focus .k { color: var(--ink-2); }
+.r-focus .pct { font-family: var(--slab); font-weight: 700; font-size: 20px; color: var(--forge); }
+.r-actions { display: flex; gap: 8px; margin-top: 20px; }
+.btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 12px; cursor: pointer; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); }
+.btn.ghost { background: transparent; color: var(--ink); }
+.btn.ghost:hover { border-color: var(--forge); color: var(--forge); }
+
+/* the stamp — the one bold flourish */
+.stamp {
+  position: absolute; right: 18px; bottom: 64px; transform: rotate(-9deg);
+  border: 3px double var(--forge); color: var(--forge);
+  font-family: var(--slab); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; line-height: 1.05; text-align: center;
+  padding: 8px 12px; font-size: 14px; max-width: 180px;
+  opacity: .92; mix-blend-mode: multiply;
+  text-shadow: 0 1px 0 rgba(168,40,29,.25);
+}
+.stamp.weak { border-color: var(--ink-3); color: var(--ink-3); transform: rotate(-5deg); text-shadow: none; }
+.stamp .sub { display: block; font-family: var(--mono); font-weight: 500; font-size: 9px; letter-spacing: 0.14em; margin-top: 3px; opacity: .8; }
+
+/* formula drawer */
+.formula { margin-top: 14px; background: var(--ink); color: var(--bg); font-size: 12px; line-height: 1.55; padding: 14px 16px; white-space: pre; overflow-x: auto; }
+
+/* vitals */
+.vitals { display: flex; flex-direction: column; gap: 16px; }
+.focus-card { border: 1px solid var(--rule-2); background: var(--paper); padding: 16px 18px; }
+.focus-card .num { font-family: var(--slab); font-weight: 700; font-size: 52px; line-height: 1; color: var(--forge); font-variant-numeric: tabular-nums; }
+.focus-card .lbl { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); margin-top: 4px; }
+.focus-card .sub { font-size: 12px; color: var(--ink-3); margin-top: 8px; font-variant-numeric: tabular-nums; }
+.vital-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.vital { background: var(--paper); padding: 11px 13px; }
+.vital .k { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.vital .v { font-size: 19px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+/* verdict cards (right rail, secondary to the stamp) */
+.verdict { border-left: 3px solid var(--forge); background: var(--paper); padding: 10px 13px; }
+.verdict + .verdict { margin-top: 8px; }
+.verdict .line { font-family: var(--slab); font-weight: 700; font-size: 15px; }
+.verdict .ev { font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+
+/* ---- timeline -------------------------------------------------------- */
+.tl { position: relative; height: 48px; border: 1px solid var(--rule-2); background: repeating-linear-gradient(90deg, transparent, transparent calc(100%/24 - 1px), var(--rule) calc(100%/24 - 1px), var(--rule) calc(100%/24)); }
+.tl .seg { position: absolute; top: 0; bottom: 0; }
+.tl-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-3); margin-top: 5px; }
+.legend { display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; }
+
+/* ---- ledgers (categories / sites / apps) ----------------------------- */
+.ledgers { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 24px; }
+@media (max-width: 820px) { .ledgers { grid-template-columns: 1fr; } }
+.ledger h3 { font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; margin: 0 0 8px; }
+.lrow { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule); }
+.lrow .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lrow .t { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.lrow .track { grid-column: 1 / -1; height: 6px; background: var(--idle); }
+.lrow .fill { height: 100%; background: var(--ink); }
+.lrow .fill.build { background: var(--forge); }
+.lempty { color: var(--ink-3); font-size: 12px; padding: 8px 0; }
+
+/* ---- intent + empty state ------------------------------------------- */
+.intent { display: flex; align-items: center; gap: 10px; }
+.intent input { font-family: var(--mono); font-size: 13px; padding: 8px 10px; border: 1px solid var(--rule-2); background: var(--paper); color: var(--ink); width: 280px; }
+.intent input:focus { outline: none; border-color: var(--forge); }
+.intent .hint { font-size: 11px; color: var(--ink-3); }
+
+.empty { border: 1px dashed var(--rule-2); background: var(--paper); padding: 34px 28px; text-align: center; }
+.empty .big { font-family: var(--slab); font-weight: 700; font-size: 20px; }
+.empty p { color: var(--ink-2); font-size: 13px; line-height: 1.6; max-width: 460px; margin: 10px auto 0; }
+
+.footer { margin-top: 44px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--ink-3); letter-spacing: 0.04em; }
