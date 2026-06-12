@@ -36,7 +36,7 @@ export default function Timeline({
         <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
       </div>
       <div className="legend">
-        <span><i style={{ background: 'var(--forge)' }} />build</span>
+        <span><i style={{ background: 'var(--forge)' }} />productive</span>
         <span><i style={{ background: 'var(--ink)' }} />other</span>
         <span><i style={{ background: 'var(--idle)' }} />idle</span>
       </div>

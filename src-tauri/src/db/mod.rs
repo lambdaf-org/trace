@@ -13,10 +13,15 @@ use rusqlite::Connection;
 /// `%LOCALAPPDATA%/org.lambdaf.trace/trace.db` on Windows, platform app-data
 /// dir elsewhere. Local, NOT Roaming: a roaming profile syncs %APPDATA% to a
 /// server, which would silently break the "local only" promise.
-fn db_path() -> PathBuf {
+pub fn data_dir() -> PathBuf {
     let base = dirs_app_data();
     let dir = base.join("org.lambdaf.trace");
     let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+pub fn database_path() -> PathBuf {
+    let dir = data_dir();
     let path = dir.join("trace.db");
     #[cfg(windows)]
     migrate_from_roaming(&dir, &path);
@@ -67,7 +72,7 @@ fn dirs_app_data() -> PathBuf {
 }
 
 pub fn open() -> Result<Connection> {
-    let conn = Connection::open(db_path())?;
+    let conn = Connection::open(database_path())?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     // "Delete any day anytime" must mean gone: zero freed pages on delete

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getDaySummary, getReceipt, getEvents, setDayLabel, pauseTracking,
-  todayKey, shiftDay, isTauri, trackingState,
+  todayKey, shiftDay, isTauri, trackingState, getDataLocation,
+  openDataFolder, purgeAllData,
 } from '@/lib/api';
-import type { ActivityEvent, DaySummary, Receipt } from '@/lib/types';
+import type { ActivityEvent, DataLocation, DaySummary, PurgeResult, Receipt } from '@/lib/types';
 import ReceiptCard from '@/components/ReceiptCard';
 import Vitals from '@/components/Vitals';
 import Timeline from '@/components/Timeline';
@@ -13,6 +14,15 @@ import Ledger from '@/components/Ledger';
 import EmptyState from '@/components/EmptyState';
 
 const REFRESH_MS = 1000;
+type PurgeState = 'idle' | 'confirming' | 'purging' | 'success' | 'error';
+
+const commandHint = (ex: unknown): string => {
+  const message = String(ex);
+  if (message.includes('not found')) {
+    return `${message}. The desktop backend is older than this UI; quit Trace and restart the Tauri app so the new local-data commands are registered.`;
+  }
+  return message;
+};
 
 export default function Page() {
   const [day, setDay] = useState(todayKey());
@@ -22,9 +32,24 @@ export default function Page() {
   const [tracking, setTracking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [inTauri, setInTauri] = useState<boolean | null>(null);
+  const [dataLocation, setDataLocation] = useState<DataLocation | null>(null);
+  const [dataLocationError, setDataLocationError] = useState<string | null>(null);
+  const [purgeState, setPurgeState] = useState<PurgeState>('idle');
+  const [purgeResult, setPurgeResult] = useState<PurgeResult | null>(null);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
   const loadSeq = useRef(0);
 
   useEffect(() => { setInTauri(isTauri()); }, []);
+
+  useEffect(() => {
+    if (!inTauri) return;
+    getDataLocation()
+      .then((location) => {
+        setDataLocation(location);
+        setDataLocationError(null);
+      })
+      .catch((ex) => setDataLocationError(commandHint(ex)));
+  }, [inTauri]);
 
   const load = useCallback(async (d: string, quiet = false) => {
     const seq = ++loadSeq.current;
@@ -72,6 +97,40 @@ export default function Page() {
     await setDayLabel(day, v.trim() === '' ? null : v.trim());
     load(day);
   };
+
+  const onOpenDataFolder = async () => {
+    setPurgeError(null);
+    try {
+      await openDataFolder();
+    } catch (ex) {
+      setPurgeState('error');
+      setPurgeError(`Could not open data folder: ${commandHint(ex)}`);
+    }
+  };
+
+  const onConfirmPurge = async () => {
+    if (purgeState === 'purging') return;
+    setPurgeState('purging');
+    setPurgeError(null);
+    setPurgeResult(null);
+    try {
+      const result = await purgeAllData();
+      setPurgeResult(result);
+      setPurgeState('success');
+      setSummary(null);
+      setReceipt(null);
+      setEvents([]);
+      setTracking(false);
+      await load(day);
+    } catch (ex) {
+      setPurgeError(commandHint(ex));
+      setPurgeState('error');
+    }
+  };
+
+  const purgeSummary = purgeResult
+    ? `Purged ${purgeResult.activity_events_deleted} activity segment${purgeResult.activity_events_deleted === 1 ? '' : 's'} and ${purgeResult.day_labels_deleted} day label${purgeResult.day_labels_deleted === 1 ? '' : 's'}. Tracking is paused.`
+    : null;
 
   const buildCats = summary?.build_categories ?? ['code', 'terminal'];
   const isEmpty = !summary || (summary.active_ms === 0 && summary.idle_ms === 0 && events.length === 0);
@@ -166,8 +225,117 @@ export default function Page() {
         </>
       )}
 
+      <section className="privacy" aria-labelledby="privacy-title">
+        <div>
+          <h2 id="privacy-title">Privacy & data</h2>
+          <p>
+            Trace stores activity data locally only, in SQLite on this machine. This app has no
+            account, cloud sync, analytics, telemetry, remote logging, crash reporter, or hidden
+            upload path. Private browser windows are treated like any other browser window if the
+            address bar exposes a domain.
+          </p>
+
+          <div className="privacy-grid">
+            <div>
+              <h3>Collected</h3>
+              <ul>
+                <li>Foreground app and process name.</li>
+                <li>Segment start time, end time, duration, and idle state.</li>
+                <li>Counts of keypresses and mouse clicks, never which keys.</li>
+                <li>Mouse travel distance in pixels, never cursor positions.</li>
+                <li>Browser domain only when available; query strings and fragments are stripped.</li>
+                <li>Window titles only if explicitly enabled in local settings.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Never collected</h3>
+              <ul>
+                <li>Typed text, passwords, form fields, or message contents.</li>
+                <li>Screenshots, camera, microphone, clipboard, or document contents.</li>
+                <li>File contents, file paths, packet contents, or network traffic.</li>
+                <li>Full browser URLs by default.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="data-panel">
+            <h3>Local storage</h3>
+            <div className="path-row">
+              <span>Folder</span>
+              <code>{dataLocationError ? 'unavailable' : dataLocation?.data_dir ?? 'loading...'}</code>
+            </div>
+            <div className="path-row">
+              <span>SQLite</span>
+              <code>{dataLocationError ? 'unavailable' : dataLocation?.database_path ?? 'loading...'}</code>
+            </div>
+            <button className="btn ghost" onClick={onOpenDataFolder} disabled={!dataLocation}>
+              open data folder
+            </button>
+            {dataLocationError && (
+              <div className="status-line err">Data location unavailable: {dataLocationError}</div>
+            )}
+          </div>
+
+          <div className="danger-zone">
+            <h3>Danger zone</h3>
+            <p>
+              Purge permanently deletes local Trace history and day labels from SQLite, then
+              compacts the database. Settings and category rules are kept. Tracking is paused after
+              purge so new data is not recreated immediately.
+            </p>
+            <button
+              className="btn danger-btn"
+              onClick={() => {
+                setPurgeError(null);
+                setPurgeState('confirming');
+              }}
+              disabled={purgeState === 'purging'}
+            >
+              {purgeState === 'purging' ? 'purging...' : 'purge all data'}
+            </button>
+            {purgeState === 'success' && purgeSummary && (
+              <div className="status-line ok">{purgeSummary}</div>
+            )}
+            {purgeState === 'error' && purgeError && (
+              <div className="status-line err">Action failed: {purgeError}</div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {(purgeState === 'confirming' || purgeState === 'purging') && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="purge-title">
+            <h2 id="purge-title">Purge all local Trace history?</h2>
+            <p>
+              This permanently deletes activity segments, browser domains, input counts, idle
+              records, and day labels from the local Trace database. Settings and category rules are
+              kept, and tracking will be paused after the purge.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                onClick={() => setPurgeState('idle')}
+                disabled={purgeState === 'purging'}
+              >
+                cancel
+              </button>
+              <button
+                className="btn danger-btn"
+                onClick={onConfirmPurge}
+                disabled={purgeState === 'purging'}
+              >
+                {purgeState === 'purging' ? 'purging...' : 'yes, purge all data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="footer">
-        local only · no account · no cloud · counts keystrokes, never keys · records window titles, private windows too · URLs kept as domain, query strings stripped · delete any day anytime, gone for real
+        local only · no account · no cloud · counts keystrokes, never keys · window titles off by default · browser URLs kept as domain, query strings stripped · purge all data anytime
       </div>
     </div>
   );

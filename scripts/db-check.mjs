@@ -9,21 +9,18 @@ console.log('db:', path, existsSync(roaming) ? '(NOTE: roaming copy still exists
 
 const db = new DatabaseSync(path, { readOnly: true });
 const q = (sql) => db.prepare(sql).all();
+const tableExists = (name) =>
+  q(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='${name}' LIMIT 1`).length > 0;
 
 console.log('--- settings ---');
 console.log(q('SELECT key, value FROM setting'));
 
 console.log('--- last 5 activity events ---');
 console.log(q(`SELECT id, datetime(started_at/1000,'unixepoch','localtime') AS start,
-  app_name, url, category, is_idle FROM activity_event ORDER BY id DESC LIMIT 5`));
+  app_name, process_name, window_title, url, category, keyboard_count,
+  mouse_click_count, mouse_move_distance, is_idle
+  FROM activity_event ORDER BY id DESC LIMIT 5`));
 
-console.log('--- last 10 net events ---');
-console.log(q(`SELECT id, datetime(started_at/1000,'unixepoch','localtime') AS start,
-  datetime(ended_at/1000,'unixepoch','localtime') AS end,
-  app_name, domain, duration_ms FROM net_event ORDER BY id DESC LIMIT 10`));
-
-console.log('--- net events today ---');
-console.log(q(`SELECT COUNT(*) AS rows, COUNT(DISTINCT domain) AS domains,
-  COUNT(DISTINCT process_name) AS apps,
-  MAX(datetime(ended_at/1000,'unixepoch','localtime')) AS last_end
-  FROM net_event WHERE local_day = date('now','localtime')`));
+if (tableExists('net_event')) {
+  console.log('NOTE: retired net_event table exists in this old local DB; app purge removes its rows.');
+}

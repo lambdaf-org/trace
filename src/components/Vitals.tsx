@@ -19,7 +19,7 @@ export default function Vitals({ s }: { s: DaySummary }) {
         <div className="vital"><div className="k">idle</div><div className="v">{fmtHMS(s.idle_ms)}</div></div>
         <div className="vital"><div className="k">switches</div><div className="v">{s.context_switches}</div></div>
         <div className="vital"><div className="k">longest focus</div><div className="v">{fmtHMS(s.longest_focus_ms)}</div></div>
-        <div className="vital"><div className="k">fragmented hr</div><div className="v">{frag}</div></div>
+        <div className="vital"><div className="k">MOST INTERRUPTED HOUR</div><div className="v">{frag}</div></div>
         <div className="vital"><div className="k">sites</div><div className="v">{s.top_sites.length}</div></div>
       </div>
 

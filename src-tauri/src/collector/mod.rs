@@ -8,7 +8,7 @@ pub mod foreground;
 pub mod idle;
 pub mod input;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -65,7 +65,7 @@ pub(crate) fn friendly(process: &str) -> String {
                 .strip_suffix(".exe")
                 .or_else(|| process.strip_suffix(".EXE"))
                 .unwrap_or(process)
-                .to_string()
+                .to_string();
         }
     }
     .to_string()
@@ -90,7 +90,7 @@ fn read_cfg(conn: &Connection) -> Cfg {
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(60)
             * 1000,
-        capture_titles: g("capture_titles").map(|v| v == "true").unwrap_or(true),
+        capture_titles: g("capture_titles").map(|v| v == "true").unwrap_or(false),
         track_urls: g("track_urls").map(|v| v == "true").unwrap_or(true),
         url_detail: g("url_detail").unwrap_or_else(|| "host".to_string()),
         browser_processes: browser::browser_processes(&g("browser_processes").unwrap_or_default()),
@@ -142,10 +142,10 @@ fn persist_segment(db: &Arc<Mutex<Connection>>, seg: &mut OpenSegment, ended_at:
     }
 }
 
-pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>) {
+pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>, data_epoch: Arc<AtomicU64>) {
     #[cfg(not(windows))]
     {
-        let _ = (&db, &paused);
+        let _ = (&db, &paused, &data_epoch);
         eprintln!("[trace] collector is Windows-only in V0; running without capture.");
         return;
     }
@@ -161,9 +161,15 @@ pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>) {
             };
 
             let mut current: Option<OpenSegment> = None;
+            let mut seen_epoch = data_epoch.load(Ordering::SeqCst);
 
             loop {
                 let now = now_ms();
+                let epoch = data_epoch.load(Ordering::SeqCst);
+                if epoch != seen_epoch {
+                    current = None;
+                    seen_epoch = epoch;
+                }
 
                 if paused.load(Ordering::Relaxed) {
                     if let Some(mut seg) = current.take() {

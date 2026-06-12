@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityEvent, CategoryRule, DaySummary, Receipt } from './types';
+import type {
+  ActivityEvent, CategoryRule, DataLocation, DaySummary, PurgeResult, Receipt,
+} from './types';
 
 export const todayKey = (): string => {
   const d = new Date();
@@ -34,6 +36,9 @@ export const getReceipt = (day: string) => call<Receipt>('get_receipt', { day })
 export const getEvents = (day: string) => call<ActivityEvent[]>('get_events', { day });
 export const deleteDay = (day: string) => call<void>('delete_day', { day });
 export const deleteEvent = (id: number) => call<void>('delete_event', { id });
+export const getDataLocation = () => call<DataLocation>('data_location');
+export const openDataFolder = () => call<void>('open_data_folder');
+export const purgeAllData = () => call<PurgeResult>('purge_all_data');
 export const setDayLabel = (day: string, label: string | null) =>
   call<void>('set_day_label', { day, label });
 export const getSettings = () => call<Record<string, string>>('get_settings');

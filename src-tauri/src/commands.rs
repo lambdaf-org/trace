@@ -1,13 +1,17 @@
 //! The Rust<->frontend surface. Every command takes the shared connection from
 //! managed state; the frontend never opens the database itself.
 
+use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::Ordering;
 
 use tauri::State;
 
-use crate::db::repo;
+use crate::db::{self, repo};
 use crate::metrics;
-use crate::model::{ActivityEvent, AppState, CategoryRule, DaySummary, Receipt};
+use crate::model::{
+    ActivityEvent, AppState, CategoryRule, DataLocation, DaySummary, PurgeResult, Receipt,
+};
 
 type Cmd<T> = Result<T, String>;
 
@@ -46,6 +50,47 @@ pub fn delete_day(state: State<AppState>, day: String) -> Cmd<()> {
 pub fn delete_event(state: State<AppState>, id: i64) -> Cmd<()> {
     let conn = lock(&state)?;
     repo::delete_event(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn data_location() -> Cmd<DataLocation> {
+    Ok(DataLocation {
+        data_dir: db::data_dir().display().to_string(),
+        database_path: db::database_path().display().to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn open_data_folder() -> Cmd<()> {
+    open_folder(&db::data_dir()).map_err(|e| e.to_string())
+}
+
+fn open_folder(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        Command::new("explorer").arg(path).spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn purge_all_data(state: State<AppState>) -> Cmd<PurgeResult> {
+    state.paused.store(true, Ordering::Relaxed);
+    state.data_epoch.fetch_add(1, Ordering::SeqCst);
+
+    let mut conn = lock(&state)?;
+    repo::set_setting(&conn, "tracking_paused", "true").map_err(|e| e.to_string())?;
+    let mut result = repo::purge_activity_data(&mut conn).map_err(|e| e.to_string())?;
+    result.tracking_paused = true;
+    Ok(result)
 }
 
 #[tauri::command]

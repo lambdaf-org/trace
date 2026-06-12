@@ -3,10 +3,10 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::{ActivityEvent, CategoryRule};
+use crate::model::{ActivityEvent, CategoryRule, PurgeResult};
 
 fn row_to_event(r: &rusqlite::Row) -> rusqlite::Result<ActivityEvent> {
     Ok(ActivityEvent {
@@ -126,6 +126,53 @@ pub fn delete_day(conn: &Connection, day: &str) -> Result<()> {
     // secure_delete zeroes the freed pages; truncating the WAL drops the
     // copies that lived there, so a deleted day is not recoverable from disk.
     let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    Ok(())
+}
+
+pub fn purge_activity_data(conn: &mut Connection) -> Result<PurgeResult> {
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "secure_delete", "ON")?;
+
+    let tx = conn.transaction()?;
+    let activity_events_deleted = tx.execute("DELETE FROM activity_event", [])?;
+    let day_labels_deleted = tx.execute("DELETE FROM day_meta", [])?;
+    let retired_network_events_deleted = if tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'net_event' LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
+    {
+        tx.execute("DELETE FROM net_event", [])?
+    } else {
+        0
+    };
+    tx.commit()?;
+
+    // Make "purged" mean gone from the main DB and its WAL, not merely hidden
+    // from query results. VACUUM cannot run inside a transaction.
+    checkpoint_wal(conn)?;
+    conn.execute_batch("VACUUM")?;
+    checkpoint_wal(conn)?;
+
+    Ok(PurgeResult {
+        activity_events_deleted,
+        day_labels_deleted,
+        retired_network_events_deleted,
+        settings_preserved: true,
+        tracking_paused: false,
+    })
+}
+
+fn checkpoint_wal(conn: &Connection) -> Result<()> {
+    let busy = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+        r.get::<_, i64>(0)
+    })?;
+    if busy != 0 {
+        bail!("SQLite WAL checkpoint was blocked by another reader");
+    }
     Ok(())
 }
 
@@ -260,4 +307,72 @@ pub fn categorize(
         }
     }
     "unknown".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations;
+
+    #[test]
+    fn purge_activity_data_deletes_history_and_preserves_settings() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations::run(&conn).unwrap();
+
+        insert_event(
+            &conn,
+            1_000,
+            2_000,
+            "2026-06-12",
+            "Code",
+            "code.exe",
+            Some("secret-project.txt"),
+            Some("github.com"),
+            "code",
+            12,
+            3,
+            42.0,
+            false,
+        )
+        .unwrap();
+        set_day_label(&conn, "2026-06-12", Some("private plan")).unwrap();
+        set_setting(&conn, "tracking_paused", "false").unwrap();
+        conn.execute(
+            "CREATE TABLE net_event (id INTEGER PRIMARY KEY, local_day TEXT, app_name TEXT, domain TEXT)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO net_event (local_day, app_name, domain) VALUES ('2026-06-12', 'Arc', 'example.com')",
+            [],
+        )
+        .unwrap();
+
+        let result = purge_activity_data(&mut conn).unwrap();
+
+        assert_eq!(result.activity_events_deleted, 1);
+        assert_eq!(result.day_labels_deleted, 1);
+        assert_eq!(result.retired_network_events_deleted, 1);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM activity_event", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM day_meta", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM net_event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            get_setting(&conn, "tracking_paused").unwrap(),
+            Some("false".to_string())
+        );
+        assert!(!list_category_rules(&conn).unwrap().is_empty());
+    }
 }

@@ -2,15 +2,15 @@
 
 #[cfg(windows)]
 pub fn foreground_snapshot() -> Option<(String, String)> {
-    use windows::core::PWSTR;
     use windows::Win32::Foundation::{HWND, MAX_PATH};
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
     };
+    use windows::core::PWSTR;
 
     unsafe {
         let hwnd: HWND = GetForegroundWindow();

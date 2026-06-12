@@ -7,11 +7,12 @@ not by a promise in a settings page.
 ## What Trace records
 
 - The foreground app and its process name (e.g. `Code.exe`).
-- The window title, **if title capture is enabled** (it is, by default, and can
-  be turned off in settings — see "The title caveat").
+- The window title, **only if title capture is explicitly enabled**. It is off
+  by default because titles can contain private document or message names.
 - Start time, end time, and duration of each segment.
 - A **count** of keypresses during each segment. Never which keys.
 - A count of mouse clicks and an approximate pixel travel distance.
+- The active browser domain when available, if URL tracking is enabled.
 - Whether the segment was active or idle.
 
 ## What Trace never records
@@ -21,7 +22,7 @@ not by a promise in a settings page.
 - Clipboard contents.
 - Network packet contents, cookies, or browser storage.
 - Passwords or secrets.
-- Full URLs, query parameters, or page contents.
+- Full URLs by default, query parameters, fragments, or page contents.
 
 ## How the keystroke counter stays a counter
 
@@ -46,20 +47,26 @@ What is kept is deliberately minimal:
 
 - The string is stripped **before storage**: scheme and `www.` removed, and the
   query string and fragment (everything from `?` or `#`) always dropped.
-- By default only the **host** is kept (`github.com`), not the path. A setting
-  (`url_detail = host_path`) can keep the path too, but never the query.
+- By default only the **host** is kept (`github.com`), not the path. An advanced
+  local setting (`url_detail = host_path`) can keep the path too, but never the
+  query string or fragment.
 - URL capture can be turned off entirely (`track_urls = false`).
 
 Domains are what make the focus ratio honest — `localhost` and `github.com`
 count as build time instead of generic "browser" time — without recording what
 you searched or which exact page you read.
 
+Private/incognito browser windows are not reliably distinguishable from regular
+browser windows at the OS/window level. If the browser exposes a domain in the
+address bar, Trace can store that domain under the same host-only rules.
+
 ## The title caveat
 
 Window titles contain no URLs or query strings, but a title can still be
 sensitive on its own — `Q3-layoffs.xlsx`, a private channel name, a document
-title. Trace treats the title as the single most sensitive field it keeps:
+title. Trace treats the title as the single most sensitive field it can keep:
 
+- Title capture is off by default.
 - Title capture can be turned off entirely (stores `NULL`).
 - Titles of higher-integrity processes are unreadable by design and stored as
   `<protected>`.
@@ -67,10 +74,31 @@ title. Trace treats the title as the single most sensitive field it keeps:
 ## Where the data lives
 
 One SQLite file in the OS app-data directory
-(`%APPDATA%/org.lambdaf.trace/trace.db` on Windows). No network code runs. You
-can open it with any SQLite browser, export it, delete a single day or session
-from the app, or delete the whole file. When it is gone, it is gone — there is
-no copy anywhere else.
+(`%LOCALAPPDATA%/org.lambdaf.trace/trace.db` on Windows). Trace moved away from
+Roaming app data so a Windows roaming profile does not silently sync history to
+a server.
+
+No analytics, telemetry, cloud sync, crash reporter, remote logger, account
+system, or external runtime font/script request is included. The frontend cannot
+open the database directly; it talks to Rust through Tauri commands.
+
+## Deleting data
+
+The app's **Privacy & Data** section has a **Purge all data** action. It requires
+confirmation, then deletes local activity segments, browser-domain values,
+input counts, idle records, day labels, and any retired network-event table left
+by an old database. It preserves settings and category rules, pauses tracking,
+checkpoints the SQLite WAL, and runs `VACUUM`.
+
+You can also delete the database file from the local app-data folder while Trace
+is closed. When the local database and sidecar files are gone, Trace has no
+other copy.
+
+## User-controlled exits
+
+The receipt has a **Copy receipt** button that writes the visible receipt text to
+the OS clipboard when you click it. Trace never reads clipboard contents and does
+not send copied text anywhere.
 
 ## Privileges
 

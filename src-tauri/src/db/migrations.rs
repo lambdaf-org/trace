@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA_LATEST: &str = r#"
 CREATE TABLE activity_event (
@@ -49,7 +49,7 @@ CREATE TABLE setting (
 const SEED_SETTINGS: &[(&str, &str)] = &[
     ("idle_threshold_seconds", "60"),
     ("poll_interval_ms", "1000"),
-    ("capture_titles", "true"),
+    ("capture_titles", "false"),
     ("build_categories", "code,terminal"),
     ("focus_break_idle_seconds", "120"),
     // URL capture: on, domain-only. 'host' keeps only the domain; 'host_path'
@@ -139,22 +139,30 @@ pub fn run(conn: &Connection) -> Result<()> {
             migrate_2_to_3(conn)?;
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
-            conn.execute("UPDATE schema_version SET version = 5", [])?;
+            migrate_5_to_6(conn)?;
+            conn.execute("UPDATE schema_version SET version = 6", [])?;
         }
         Some(2) => {
             migrate_2_to_3(conn)?;
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
-            conn.execute("UPDATE schema_version SET version = 5", [])?;
+            migrate_5_to_6(conn)?;
+            conn.execute("UPDATE schema_version SET version = 6", [])?;
         }
         Some(3) => {
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
-            conn.execute("UPDATE schema_version SET version = 5", [])?;
+            migrate_5_to_6(conn)?;
+            conn.execute("UPDATE schema_version SET version = 6", [])?;
         }
         Some(4) => {
             migrate_4_to_5(conn)?;
-            conn.execute("UPDATE schema_version SET version = 5", [])?;
+            migrate_5_to_6(conn)?;
+            conn.execute("UPDATE schema_version SET version = 6", [])?;
+        }
+        Some(5) => {
+            migrate_5_to_6(conn)?;
+            conn.execute("UPDATE schema_version SET version = 6", [])?;
         }
         Some(v) if v < SCHEMA_VERSION => {
             conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
@@ -194,6 +202,19 @@ fn migrate_3_to_4(conn: &Connection) -> Result<()> {
 /// v4 -> v5: configurable browser process allow-list for URL capture.
 fn migrate_4_to_5(conn: &Connection) -> Result<()> {
     seed_settings(conn)?;
+    Ok(())
+}
+
+/// v5 -> v6: public privacy pass. Window titles are opt-in from this point on,
+/// and the retired network metadata table is removed if an old local database
+/// still has it.
+fn migrate_5_to_6(conn: &Connection) -> Result<()> {
+    seed_settings(conn)?;
+    conn.execute(
+        "UPDATE setting SET value = 'false' WHERE key = 'capture_titles'",
+        [],
+    )?;
+    conn.execute("DROP TABLE IF EXISTS net_event", [])?;
     Ok(())
 }
 

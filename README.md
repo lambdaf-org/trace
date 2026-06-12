@@ -9,7 +9,7 @@
 
 Trace is a local-only activity recorder for people who build. It watches which app is in front of you, how long you stay there, and how much you type and click — then turns the day into a plain-text **receipt** that shows its work: every number carries the arithmetic that produced it, and a verdict it can defend from the tally.
 
-No account. No cloud. No sync. It never stores typed text, screenshots, the clipboard, packet contents, or full URLs — only metadata, in one SQLite file on your disk that you can read, export, or delete. This is a personal forensic tool, not a monitor. There is no one to report to but you.
+No account. No cloud. No sync. No analytics or telemetry. It never stores typed text, screenshots, the clipboard, packet contents, or full URLs by default — only local metadata, in one SQLite file on your disk that you can inspect or purge. This is a personal forensic tool, not a monitor. There is no one to report to but you.
 
 <p align="center">
   <img src="docs/img/trace-showcase.png" alt="Trace Showcase with sample Data" width="640"><br>
@@ -27,7 +27,7 @@ npm install
 npm run tauri dev
 ```
 
-The database lives at the OS app-data dir (`%APPDATA%/org.lambdaf.trace/trace.db` on Windows). Delete that file and the history is gone — there is nowhere else it went.
+The database lives in the local OS app-data dir (`%LOCALAPPDATA%/org.lambdaf.trace/trace.db` on Windows). Trace also exposes this path in the Privacy & Data section, with an "Open data folder" button.
 
 Build a Windows installer:
 
@@ -38,27 +38,35 @@ npm run tauri build                   # produces an NSIS + MSI bundle
 
 ## What Trace records / never records
 
-| Records (metadata only)        | Never records                          |
-| ------------------------------ | -------------------------------------- |
-| Active app + process name      | Typed text / keystroke contents        |
-| Window title (toggleable)      | Screenshots or screen recording        |
-| Active browser **domain**      | Full URLs / query parameters / page text|
-| Start / end / duration         | Clipboard contents                     |
-| Keypress **count** (not keys)  | Packet contents, cookies, storage      |
-| Mouse click count + travel     | Passwords or secrets                   |
-| Idle vs active                 | Clicks/keys mapped to content          |
+| Records (metadata only)                 | Never records                           |
+| --------------------------------------- | --------------------------------------- |
+| Active app + process name               | Typed text / keystroke contents         |
+| Window title only if explicitly enabled | Screenshots or screen recording         |
+| Active browser **domain** by default    | Query parameters / page text            |
+| Start / end / duration                  | Clipboard contents                      |
+| Keypress **count** (not keys)           | Packet contents, cookies, storage       |
+| Mouse click count + travel distance     | Passwords or secrets                    |
+| Idle vs active                          | Clicks/keys mapped to content           |
 
 The keypress counter is the line that matters: the raw-input handler increments a number and never inspects which key fired. That is the whole difference between a counter and a keylogger, and it is enforceable in one function. See [docs/PRIVACY.md](docs/PRIVACY.md).
 
+## Deleting data
+
+Use the **Privacy & Data** section in the app and click **Purge all data**. Trace requires confirmation, then deletes local activity segments, browser-domain rows inside those segments, input counts, idle records, day labels, and any retired network-event table left by an old local database. It preserves settings and category rules, pauses tracking, checkpoints the SQLite WAL, and runs `VACUUM`.
+
+You can also delete the database file from the local app-data folder while Trace is closed. The in-app purge is safer because it handles the open database and sidecar files cleanly.
+
+The receipt's copy button only writes the visible receipt to your OS clipboard after you click it. Trace never reads the clipboard.
+
 ## Features
 
-- **Activity segments**: every stretch in an app is one row — app, process, title, duration, and the input counts for that stretch.
+- **Activity segments**: every stretch in an app is one row — app, process, optional title, optional browser domain, duration, and the input counts for that stretch.
 - **Idle detection**: away time is measured system-wide via `GetLastInputInfo` and marked as its own segment, never folded into active time.
 - **Daily receipt**: a copyable plain-text summary plus a **formula view** that prints the worked arithmetic behind each number — the receipt is the product.
 - **Computed verdicts**: opinionated, deterministic verdicts ("you prompted more than you implemented") where each line prints the metric that triggered it. No vibes.
 - **Editable categories**: a local rules table maps processes to categories (`code`, `terminal`, `browser`, …); you own the rules.
 - **Claim vs reality**: label a day's intent ("coding day") and the receipt reconciles what you said against what the machine measured.
-- **One file, your disk**: SQLite, WAL-mode, no service, no network. Pause from the tray; delete any day or session.
+- **One file, your disk**: SQLite, WAL-mode, no service, no network. Pause from the tray; delete a day or purge all history.
 
 ## How it works
 
@@ -66,17 +74,19 @@ The keypress counter is the line that matters: the raw-input handler increments 
 OS activity  →  Rust collector  →  activity segments  →  SQLite  →  daily metrics  →  receipt
 ```
 
-A single Rust collector watches three signals on Windows: the foreground window (process + title), system idle time, and input counts from the Raw Input API registered with `RIDEV_INPUTSINK` so it can count across apps without focus. A segmenter closes the current segment and opens a new one whenever the app, title, or idle state changes, attaching the input counts accumulated during that stretch. Segments land in SQLite; the frontend never touches the database — it asks the Rust side through Tauri commands, so the privacy boundary is one module.
+A single Rust collector watches foreground app/process, system idle time, input counts from the Raw Input API registered with `RIDEV_INPUTSINK`, and browser domains when available. Window titles are off by default because titles can contain private document or message names. A segmenter closes the current segment and opens a new one whenever the app, optional title, browser domain, or idle state changes, attaching the input counts accumulated during that stretch. Segments land in SQLite; the frontend never touches the database — it asks the Rust side through Tauri commands, so the privacy boundary is one module.
 
-Metrics are computed deterministically over a day's ordered segments — active/idle split, category and app breakdowns, context switches, longest focus block, most fragmented hour, and the focus ratio — then rendered as the receipt and its formula view. Nothing is asserted that the tally cannot back.
+Metrics are computed deterministically over a day's ordered segments — active/idle split, category and app breakdowns, context switches, longest focus block, most interrupted hour, and the focus ratio — then rendered as the receipt and its formula view. Nothing is asserted that the tally cannot back.
 
 ## Privacy
 
-Trace is built so the privacy claims are structural, not promises. The collector uses only unprivileged Win32 calls — no driver, no injection, no admin. Input is counted, never captured. Everything stays in a single local file. The full record-vs-never list is in [docs/PRIVACY.md](docs/PRIVACY.md), and the implementation plan is in [docs/PLAN.md](docs/PLAN.md).
+Trace is built so the privacy claims are structural, not promises. The collector uses only unprivileged Win32 calls — no driver, no injection, no admin. Input is counted, never captured. The runtime app has no analytics, telemetry, cloud sync, crash reporter, remote logger, or external font/script request. Everything stays in the local app-data SQLite database. The full record-vs-never list is in [docs/PRIVACY.md](docs/PRIVACY.md), and the implementation plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## Roadmap
 
-V0 is Windows-first and deliberately small. Browser-**domain** tracking now ships in V0 (read from the address bar via UI Automation, query strings stripped, host-only by default). Later, opt-in only: richer per-path rules, network **metadata** (domain, port, protocol, bytes — never contents), weekly receipts and multi-week trends, JSON import/export, and an opt-in encrypted screenshot mode that is off by default. macOS and Linux collectors are possible behind the same segmenter.
+V0 is Windows-first and deliberately small. Browser-**domain** tracking ships in V0 (read from the address bar via UI Automation, query strings stripped, host-only by default). Future work should keep the same default: local-only, no accounts, no telemetry, no screenshots, and richer capture only behind explicit opt-in settings. macOS and Linux collectors are possible behind the same segmenter.
+
+Browser private/incognito windows are not reliably distinguishable from regular windows by the OS collector. If a browser exposes a domain in the address bar, Trace can store that domain under the same host-only rules.
 
 ## Contributing
 

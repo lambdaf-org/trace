@@ -187,7 +187,7 @@ pub fn active_url(detail: &str) -> Option<String> {
 #[cfg(windows)]
 fn read_address_bar(detail: &str) -> Option<String> {
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationValuePattern,

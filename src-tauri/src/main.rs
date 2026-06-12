@@ -7,13 +7,13 @@ mod db;
 mod metrics;
 mod model;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use model::AppState;
+use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::Manager;
 
 fn main() {
     // Open + migrate the database before anything else touches it.
@@ -31,9 +31,11 @@ fn main() {
 
     let db = Arc::new(Mutex::new(conn));
     let paused = Arc::new(AtomicBool::new(paused_at_start));
+    let data_epoch = Arc::new(AtomicU64::new(0));
 
     let collector_db = db.clone();
     let collector_paused = paused.clone();
+    let collector_data_epoch = data_epoch.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -43,6 +45,7 @@ fn main() {
         .manage(AppState {
             db: db.clone(),
             paused: paused.clone(),
+            data_epoch: data_epoch.clone(),
         })
         .setup(move |app| {
             // Tray: Open / Pause tracking / Quit. Pause is a one-click privacy control.
@@ -81,7 +84,11 @@ fn main() {
                 .build(app)?;
 
             // Start the OS collector on its own thread.
-            collector::spawn(collector_db.clone(), collector_paused.clone());
+            collector::spawn(
+                collector_db.clone(),
+                collector_paused.clone(),
+                collector_data_epoch.clone(),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -90,6 +97,9 @@ fn main() {
             commands::get_events,
             commands::delete_day,
             commands::delete_event,
+            commands::data_location,
+            commands::open_data_folder,
+            commands::purge_all_data,
             commands::set_day_label,
             commands::get_settings,
             commands::set_setting,

@@ -2,7 +2,7 @@
 //! serialized shapes the frontend receives.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -101,6 +101,21 @@ pub struct Receipt {
     pub formula: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DataLocation {
+    pub data_dir: String,
+    pub database_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PurgeResult {
+    pub activity_events_deleted: usize,
+    pub day_labels_deleted: usize,
+    pub retired_network_events_deleted: usize,
+    pub settings_preserved: bool,
+    pub tracking_paused: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CategoryRule {
     pub id: i64,
@@ -113,4 +128,5 @@ pub struct CategoryRule {
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub paused: Arc<AtomicBool>,
+    pub data_epoch: Arc<AtomicU64>,
 }

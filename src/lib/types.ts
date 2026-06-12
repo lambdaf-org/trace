@@ -42,6 +42,19 @@ export interface DaySummary {
 
 export interface Receipt { summary: string; formula: string; }
 
+export interface DataLocation {
+  data_dir: string;
+  database_path: string;
+}
+
+export interface PurgeResult {
+  activity_events_deleted: number;
+  day_labels_deleted: number;
+  retired_network_events_deleted: number;
+  settings_preserved: boolean;
+  tracking_paused: boolean;
+}
+
 export interface CategoryRule {
   id: number;
   match_type: string;
