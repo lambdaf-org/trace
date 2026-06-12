@@ -7,7 +7,6 @@ pub mod browser;
 pub mod foreground;
 pub mod idle;
 pub mod input;
-pub mod network;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,7 +31,7 @@ fn local_day(ms: i64) -> String {
         .unwrap_or_default()
 }
 
-fn friendly(process: &str) -> String {
+pub(crate) fn friendly(process: &str) -> String {
     match process.to_lowercase().as_str() {
         "code.exe" => "VS Code",
         "devenv.exe" => "Visual Studio",
@@ -40,11 +39,22 @@ fn friendly(process: &str) -> String {
         "windowsterminal.exe" => "Terminal",
         "powershell.exe" | "pwsh.exe" => "PowerShell",
         "cmd.exe" => "Command Prompt",
+        "arc.exe" => "Arc",
+        "brave.exe" => "Brave",
         "chrome.exe" => "Chrome",
+        "chromium.exe" => "Chromium",
+        "duckduckgo.exe" => "DuckDuckGo",
         "msedge.exe" => "Edge",
+        "opera.exe" => "Opera",
+        "opera_gx.exe" => "Opera GX",
+        "vivaldi.exe" => "Vivaldi",
         "firefox.exe" => "Firefox",
         "zen.exe" => "Zen",
-        "brave.exe" => "Brave",
+        "floorp.exe" => "Floorp",
+        "librewolf.exe" => "LibreWolf",
+        "mullvadbrowser.exe" => "Mullvad Browser",
+        "palemoon.exe" => "Pale Moon",
+        "waterfox.exe" => "Waterfox",
         "discord.exe" => "Discord",
         "slack.exe" => "Slack",
         "teams.exe" => "Teams",
@@ -67,6 +77,7 @@ struct Cfg {
     capture_titles: bool,
     track_urls: bool,
     url_detail: String,
+    browser_processes: Vec<String>,
 }
 
 fn read_cfg(conn: &Connection) -> Cfg {
@@ -82,6 +93,7 @@ fn read_cfg(conn: &Connection) -> Cfg {
         capture_titles: g("capture_titles").map(|v| v == "true").unwrap_or(true),
         track_urls: g("track_urls").map(|v| v == "true").unwrap_or(true),
         url_detail: g("url_detail").unwrap_or_else(|| "host".to_string()),
+        browser_processes: browser::browser_processes(&g("browser_processes").unwrap_or_default()),
     }
 }
 
@@ -141,7 +153,6 @@ pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>) {
     #[cfg(windows)]
     {
         input::start_listener();
-        network::spawn(db.clone(), paused.clone());
 
         thread::spawn(move || {
             let cfg = {
@@ -175,7 +186,9 @@ pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>) {
                             } else {
                                 None
                             };
-                            let url = if cfg.track_urls && browser::is_browser(&p) {
+                            let url = if cfg.track_urls
+                                && browser::is_browser(&p, &cfg.browser_processes)
+                            {
                                 browser::active_url(&cfg.url_detail)
                             } else {
                                 None

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getDaySummary, getReceipt, getEvents, getNetwork, setDayLabel, pauseTracking,
+  getDaySummary, getReceipt, getEvents, setDayLabel, pauseTracking,
   todayKey, shiftDay, isTauri, trackingState,
 } from '@/lib/api';
-import type { ActivityEvent, DaySummary, NetDomainTotal, Receipt } from '@/lib/types';
+import type { ActivityEvent, DaySummary, Receipt } from '@/lib/types';
 import ReceiptCard from '@/components/ReceiptCard';
 import Vitals from '@/components/Vitals';
 import Timeline from '@/components/Timeline';
@@ -19,7 +19,6 @@ export default function Page() {
   const [summary, setSummary] = useState<DaySummary | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [network, setNetwork] = useState<NetDomainTotal[]>([]);
   const [tracking, setTracking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [inTauri, setInTauri] = useState<boolean | null>(null);
@@ -31,15 +30,14 @@ export default function Page() {
     const seq = ++loadSeq.current;
     if (!quiet) setErr(null);
     try {
-      const [s, r, e, n, t] = await Promise.all([
+      const [s, r, e, t] = await Promise.all([
         getDaySummary(d),
         getReceipt(d),
         getEvents(d),
-        getNetwork(d),
         trackingState(),
       ]);
       if (seq !== loadSeq.current) return;
-      setSummary(s); setReceipt(r); setEvents(e); setNetwork(n);
+      setSummary(s); setReceipt(r); setEvents(e);
       setTracking(t);
       setErr(null);
     } catch (ex) {
@@ -164,17 +162,12 @@ export default function Page() {
               title="apps"
               rows={summary.top_apps.map((a) => ({ name: a.app_name, ms: a.ms }))}
             />
-            <Ledger
-              title="network domains"
-              rows={network.slice(0, 12).map((n) => ({ name: n.domain, ms: n.ms }))}
-              empty="no connections recorded"
-            />
           </div>
         </>
       )}
 
       <div className="footer">
-        local only · no account · no cloud · counts keystrokes, never keys · records window titles, private windows too · URLs kept as domain, query strings stripped · network seen as domains, never IPs or packets · delete any day anytime, gone for real
+        local only · no account · no cloud · counts keystrokes, never keys · records window titles, private windows too · URLs kept as domain, query strings stripped · delete any day anytime, gone for real
       </div>
     </div>
   );

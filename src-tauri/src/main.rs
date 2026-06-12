@@ -88,7 +88,6 @@ fn main() {
             commands::get_day_summary,
             commands::get_receipt,
             commands::get_events,
-            commands::get_network,
             commands::delete_day,
             commands::delete_event,
             commands::set_day_label,

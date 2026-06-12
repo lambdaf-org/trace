@@ -49,9 +49,86 @@ pub fn strip(raw: &str, detail: &str) -> Option<String> {
     }
 }
 
+const DEFAULT_BROWSER_PROCESSES: &[&str] = &[
+    // Chromium family
+    "arc.exe",
+    "brave.exe",
+    "chrome.exe",
+    "chromium.exe",
+    "duckduckgo.exe",
+    "maxthon.exe",
+    "msedge.exe",
+    "opera.exe",
+    "opera_gx.exe",
+    "qutebrowser.exe",
+    "sidekick.exe",
+    "thorium.exe",
+    "vivaldi.exe",
+    "whale.exe",
+    "yandex.exe",
+    // Firefox / Gecko family
+    "basilisk.exe",
+    "firefox.exe",
+    "floorp.exe",
+    "librewolf.exe",
+    "mullvadbrowser.exe",
+    "palemoon.exe",
+    "seamonkey.exe",
+    "torbrowser.exe",
+    "waterfox.exe",
+    "zen.exe",
+];
+
+fn normalize_process_name(process: &str) -> Option<String> {
+    let p = process.trim().to_lowercase();
+    if p.is_empty() || p.contains('\\') || p.contains('/') {
+        return None;
+    }
+    Some(if p.ends_with(".exe") {
+        p
+    } else {
+        format!("{p}.exe")
+    })
+}
+
+pub fn browser_processes(extra: &str) -> Vec<String> {
+    let mut out = DEFAULT_BROWSER_PROCESSES
+        .iter()
+        .filter_map(|p| normalize_process_name(p))
+        .collect::<Vec<_>>();
+    for p in extra.split(',').filter_map(normalize_process_name) {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+pub fn is_browser(process: &str, browsers: &[String]) -> bool {
+    let Some(process) = normalize_process_name(process) else {
+        return false;
+    };
+    browsers.iter().any(|p| p == &process)
+}
+
+fn looks_like_address_control(name: &str, automation_id: &str) -> bool {
+    let haystack = format!("{name} {automation_id}").to_lowercase();
+    [
+        "address",
+        "awesomebar",
+        "location",
+        "omnibox",
+        "search or enter",
+        "search with",
+        "url",
+    ]
+    .iter()
+    .any(|needle| haystack.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::strip;
+    use super::{browser_processes, is_browser, looks_like_address_control, strip};
 
     #[test]
     fn strips_to_host_without_query_or_port() {
@@ -74,13 +151,27 @@ mod tests {
         assert_eq!(strip("new tab", "host"), None);
         assert_eq!(strip("search terms with spaces", "host"), None);
     }
-}
 
-pub fn is_browser(process: &str) -> bool {
-    matches!(
-        process.to_lowercase().as_str(),
-        "chrome.exe" | "msedge.exe" | "firefox.exe" | "zen.exe" | "brave.exe" | "opera.exe"
-    )
+    #[test]
+    fn recognizes_default_and_configured_browser_processes() {
+        let browsers = browser_processes("custombrowser, Weird.exe, chrome.exe");
+        assert!(is_browser("vivaldi.exe", &browsers));
+        assert!(is_browser("LibreWolf.exe", &browsers));
+        assert!(is_browser("custombrowser.exe", &browsers));
+        assert!(is_browser("weird.exe", &browsers));
+        assert!(!is_browser("code.exe", &browsers));
+    }
+
+    #[test]
+    fn recognizes_address_control_metadata() {
+        assert!(looks_like_address_control(
+            "Search with Google or enter address",
+            ""
+        ));
+        assert!(looks_like_address_control("", "urlbar-input"));
+        assert!(looks_like_address_control("Address and search bar", ""));
+        assert!(!looks_like_address_control("Email", "login"));
+    }
 }
 
 #[cfg(not(windows))]
@@ -99,8 +190,8 @@ fn read_address_bar(detail: &str) -> Option<String> {
         CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
     };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationValuePattern, TreeScope_Descendants,
-        UIA_ControlTypePropertyId, UIA_ValuePatternId,
+        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationValuePattern,
+        TreeScope_Descendants, UIA_ControlTypePropertyId, UIA_ValuePatternId,
     };
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
@@ -124,23 +215,58 @@ fn read_address_bar(detail: &str) -> Option<String> {
             .CreatePropertyCondition(UIA_ControlTypePropertyId, &UIA_EDIT_CONTROL_TYPE_ID.into())
             .ok()?;
 
+        let read_value = |element: &IUIAutomationElement| -> Option<String> {
+            let value: IUIAutomationValuePattern =
+                match element.GetCurrentPatternAs(UIA_ValuePatternId) {
+                    Ok(value) => value,
+                    Err(_) => return None,
+                };
+            let bstr = match value.CurrentValue() {
+                Ok(value) => value,
+                Err(_) => return None,
+            };
+            Some(bstr.to_string())
+        };
+
         let edits = root.FindAll(TreeScope_Descendants, &cond).ok()?;
         let len = edits.Length().ok()?;
         for i in 0..len {
             let edit = edits.GetElement(i).ok()?;
-            let value: IUIAutomationValuePattern =
-                match edit.GetCurrentPatternAs(UIA_ValuePatternId) {
-                    Ok(value) => value,
-                    Err(_) => continue,
-                };
-            let bstr = match value.CurrentValue() {
-                Ok(value) => value,
-                Err(_) => continue,
+            let Some(raw) = read_value(&edit) else {
+                continue;
             };
-            if let Some(url) = strip(&bstr.to_string(), detail) {
+            if let Some(url) = strip(&raw, detail) {
                 return Some(url);
             }
         }
+
+        let all = root
+            .FindAll(
+                TreeScope_Descendants,
+                &automation.CreateTrueCondition().ok()?,
+            )
+            .ok()?;
+        let len = all.Length().ok()?;
+        for i in 0..len.min(500) {
+            let element = all.GetElement(i).ok()?;
+            let Some(raw) = read_value(&element) else {
+                continue;
+            };
+            let name = element
+                .CurrentName()
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let automation_id = element
+                .CurrentAutomationId()
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            if looks_like_address_control(&name, &automation_id) {
+                if let Some(url) = strip(&raw, detail) {
+                    return Some(url);
+                }
+            }
+        }
+
         None
     }
 }
