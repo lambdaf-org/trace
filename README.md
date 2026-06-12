@@ -11,27 +11,10 @@ Trace is a local-only activity recorder for people who build. It watches which a
 
 No account. No cloud. No sync. It never stores typed text, screenshots, the clipboard, packet contents, or full URLs — only metadata, in one SQLite file on your disk that you can read, export, or delete. This is a personal forensic tool, not a monitor. There is no one to report to but you.
 
-```
-TRACE RECEIPT — 2026-06-11
-
-Active time:  7h 27m
-Idle time:    1h 09m
-
-Build tools     4h 58m   ██████████████████░░░░░░░░░
-Communication     47m    ███░░░░░░░░░░░░░░░░░░░░░░░░░
-Video             51m    ███░░░░░░░░░░░░░░░░░░░░░░░░░
-Social            37m    ██░░░░░░░░░░░░░░░░░░░░░░░░░░
-Admin             14m    █░░░░░░░░░░░░░░░░░░░░░░░░░░░
-
-Focus ratio = build-tool time / active time
-  VS Code + Terminal + GitHub + Localhost
-  3h12m + 42m + 28m + 36m = 4h 58m
-  4h 58m / 7h 27m = 66.7%
-
-VERDICT
-  This was a real build day.
-  66.7% of active time went into production tools.
-```
+<p align="center">
+  <img src="docs/img/trace-showcase.png" alt="Trace Showcase with sample Data" width="640"><br>
+  <sub>Trace with a currently tracked Receipt and Focus Ratio (sample data)</sub>
+</p>
 
 ## Quickstart
 
