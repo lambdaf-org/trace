@@ -44,32 +44,6 @@ CREATE TABLE setting (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-
-CREATE TABLE net_event (
-    id           INTEGER PRIMARY KEY,
-    started_at   INTEGER NOT NULL,
-    ended_at     INTEGER,
-    duration_ms  INTEGER,
-    local_day    TEXT    NOT NULL,
-    app_name     TEXT    NOT NULL,
-    process_name TEXT    NOT NULL,
-    domain       TEXT    NOT NULL
-);
-CREATE INDEX idx_net_event_day ON net_event(local_day);
-"#;
-
-const NET_EVENT_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS net_event (
-    id           INTEGER PRIMARY KEY,
-    started_at   INTEGER NOT NULL,
-    ended_at     INTEGER,
-    duration_ms  INTEGER,
-    local_day    TEXT    NOT NULL,
-    app_name     TEXT    NOT NULL,
-    process_name TEXT    NOT NULL,
-    domain       TEXT    NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_net_event_day ON net_event(local_day);
 "#;
 
 const SEED_SETTINGS: &[(&str, &str)] = &[
@@ -86,10 +60,6 @@ const SEED_SETTINGS: &[(&str, &str)] = &[
     // has a broad built-in Chromium/Firefox list; this is the local escape
     // hatch for niche/new browsers without a code release.
     ("browser_processes", ""),
-    // Network capture: which apps hold connections to which domains. Domains
-    // come from the local DNS cache; IPs without a cached name are never stored.
-    ("track_network", "true"),
-    ("net_poll_ms", "5000"),
     // Pause survives restarts; a missing key means tracking is on.
     ("tracking_paused", "false"),
 ];
@@ -208,10 +178,9 @@ fn migrate_1_to_2(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// v2 -> v3: per-app network domain segments + their settings.
-fn migrate_2_to_3(conn: &Connection) -> Result<()> {
-    conn.execute_batch(NET_EVENT_TABLE)?;
-    seed_settings(conn)?; // INSERT OR IGNORE — only new keys land
+/// v2 -> v3 previously added network-domain capture. It is retired now, so
+/// this remains a no-op to preserve version continuity.
+fn migrate_2_to_3(_conn: &Connection) -> Result<()> {
     Ok(())
 }
 

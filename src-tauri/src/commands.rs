@@ -7,7 +7,7 @@ use tauri::State;
 
 use crate::db::repo;
 use crate::metrics;
-use crate::model::{ActivityEvent, AppState, CategoryRule, DaySummary, NetDomainTotal, Receipt};
+use crate::model::{ActivityEvent, AppState, CategoryRule, DaySummary, Receipt};
 
 type Cmd<T> = Result<T, String>;
 
@@ -34,12 +34,6 @@ pub fn get_receipt(state: State<AppState>, day: String) -> Cmd<Receipt> {
 pub fn get_events(state: State<AppState>, day: String) -> Cmd<Vec<ActivityEvent>> {
     let conn = lock(&state)?;
     repo::events_for_day(&conn, &day).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn get_network(state: State<AppState>, day: String) -> Cmd<Vec<NetDomainTotal>> {
-    let conn = lock(&state)?;
-    repo::net_domains_for_day(&conn, &day).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

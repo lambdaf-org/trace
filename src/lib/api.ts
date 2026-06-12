@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityEvent, CategoryRule, DaySummary, NetDomainTotal, Receipt } from './types';
+import type { ActivityEvent, CategoryRule, DaySummary, Receipt } from './types';
 
 export const todayKey = (): string => {
   const d = new Date();
@@ -32,7 +32,6 @@ const call = <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
 export const getDaySummary = (day: string) => call<DaySummary>('get_day_summary', { day });
 export const getReceipt = (day: string) => call<Receipt>('get_receipt', { day });
 export const getEvents = (day: string) => call<ActivityEvent[]>('get_events', { day });
-export const getNetwork = (day: string) => call<NetDomainTotal[]>('get_network', { day });
 export const deleteDay = (day: string) => call<void>('delete_day', { day });
 export const deleteEvent = (id: number) => call<void>('delete_event', { id });
 export const setDayLabel = (day: string, label: string | null) =>
