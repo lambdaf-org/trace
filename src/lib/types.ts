@@ -21,6 +21,8 @@ export interface ActivityEvent {
 export interface CategoryTotal { category: string; ms: number; }
 export interface AppTotal { app_name: string; ms: number; }
 export interface SiteTotal { host: string; ms: number; }
+// ms is wall-clock connection time, not active screen time.
+export interface NetDomainTotal { domain: string; ms: number; apps: string[]; }
 export interface Verdict { line: string; evidence: string; }
 
 export interface DaySummary {

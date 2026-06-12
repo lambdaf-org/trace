@@ -2,23 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getDaySummary, getReceipt, getEvents, setDayLabel, pauseTracking,
+  getDaySummary, getReceipt, getEvents, getNetwork, setDayLabel, pauseTracking,
   todayKey, shiftDay, isTauri, trackingState,
 } from '@/lib/api';
-import type { ActivityEvent, DaySummary, Receipt } from '@/lib/types';
+import type { ActivityEvent, DaySummary, NetDomainTotal, Receipt } from '@/lib/types';
 import ReceiptCard from '@/components/ReceiptCard';
 import Vitals from '@/components/Vitals';
 import Timeline from '@/components/Timeline';
 import Ledger from '@/components/Ledger';
 import EmptyState from '@/components/EmptyState';
 
-const REFRESH_MS = 3000;
+const REFRESH_MS = 1000;
 
 export default function Page() {
   const [day, setDay] = useState(todayKey());
   const [summary, setSummary] = useState<DaySummary | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [network, setNetwork] = useState<NetDomainTotal[]>([]);
   const [tracking, setTracking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [inTauri, setInTauri] = useState<boolean | null>(null);
@@ -30,14 +31,15 @@ export default function Page() {
     const seq = ++loadSeq.current;
     if (!quiet) setErr(null);
     try {
-      const [s, r, e, t] = await Promise.all([
+      const [s, r, e, n, t] = await Promise.all([
         getDaySummary(d),
         getReceipt(d),
         getEvents(d),
+        getNetwork(d),
         trackingState(),
       ]);
       if (seq !== loadSeq.current) return;
-      setSummary(s); setReceipt(r); setEvents(e);
+      setSummary(s); setReceipt(r); setEvents(e); setNetwork(n);
       setTracking(t);
       setErr(null);
     } catch (ex) {
@@ -61,6 +63,9 @@ export default function Page() {
 
   const toggleTracking = async () => {
     const next = !tracking;
+    // Invalidate in-flight refreshes so a stale trackingState() can't
+    // overwrite the optimistic toggle.
+    loadSeq.current++;
     setTracking(next);
     try { await pauseTracking(!next); } catch { /* ignore */ }
   };
@@ -72,6 +77,12 @@ export default function Page() {
 
   const buildCats = summary?.build_categories ?? ['code', 'terminal'];
   const isEmpty = !summary || (summary.active_ms === 0 && summary.idle_ms === 0 && events.length === 0);
+  const isToday = day === todayKey();
+  const current = events.length > 0 ? events[events.length - 1] : null;
+  const currentLabel = current
+    ? current.is_idle ? 'idle' : (current.url ?? current.window_title ?? current.app_name)
+    : null;
+  const currentSeconds = current?.duration_ms ? Math.max(1, Math.round(current.duration_ms / 1000)) : 0;
 
   if (inTauri === false) {
     return (
@@ -114,6 +125,15 @@ export default function Page() {
         />
       </div>
 
+      {current && (
+        <div className="now">
+          <span className="now-k">{isToday ? 'right now' : 'latest'}</span>
+          <span className="now-app">{current.app_name}</span>
+          {currentLabel && <span className="now-title" title={currentLabel}>{currentLabel}</span>}
+          <span className="now-time">{currentSeconds}s</span>
+        </div>
+      )}
+
       {err && <div className="empty" style={{ marginTop: 20 }}><div className="big">Couldn’t load this day</div><p>{err}</p></div>}
 
       {!err && isEmpty && <div style={{ marginTop: 20 }}><EmptyState tracking={tracking} /></div>}
@@ -138,18 +158,23 @@ export default function Page() {
             <Ledger
               title="sites"
               rows={summary.top_sites.map((s) => ({ name: s.host, ms: s.ms }))}
-              empty="no browser activity"
+              empty="no browser domains"
             />
             <Ledger
               title="apps"
               rows={summary.top_apps.map((a) => ({ name: a.app_name, ms: a.ms }))}
+            />
+            <Ledger
+              title="network domains"
+              rows={network.slice(0, 12).map((n) => ({ name: n.domain, ms: n.ms }))}
+              empty="no connections recorded"
             />
           </div>
         </>
       )}
 
       <div className="footer">
-        local only · no account · no cloud · counts keystrokes, never keys · URLs kept as domain, query strings stripped · delete any day anytime
+        local only · no account · no cloud · counts keystrokes, never keys · records window titles, private windows too · URLs kept as domain, query strings stripped · network seen as domains, never IPs or packets · delete any day anytime, gone for real
       </div>
     </div>
   );

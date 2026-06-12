@@ -2,6 +2,11 @@ import { fmtHM } from '@/lib/api';
 
 export interface LedgerRow { name: string; ms: number; build?: boolean }
 
+const fmtLedgerTime = (ms: number): string => {
+  if (ms > 0 && ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  return fmtHM(ms);
+};
+
 export default function Ledger({
   title, rows, empty,
 }: { title: string; rows: LedgerRow[]; empty?: string }) {
@@ -13,7 +18,7 @@ export default function Ledger({
       {rows.map((r) => (
         <div className="lrow" key={r.name}>
           <span className="name" title={r.name}>{r.name}</span>
-          <span className="t">{fmtHM(r.ms)}</span>
+          <span className="t">{fmtLedgerTime(r.ms)}</span>
           <span className="track"><span className={`fill${r.build ? ' build' : ''}`} style={{ width: `${(r.ms / max) * 100}%` }} /></span>
         </div>
       ))}

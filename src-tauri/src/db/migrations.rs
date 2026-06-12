@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA_LATEST: &str = r#"
 CREATE TABLE activity_event (
@@ -44,6 +44,32 @@ CREATE TABLE setting (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE net_event (
+    id           INTEGER PRIMARY KEY,
+    started_at   INTEGER NOT NULL,
+    ended_at     INTEGER,
+    duration_ms  INTEGER,
+    local_day    TEXT    NOT NULL,
+    app_name     TEXT    NOT NULL,
+    process_name TEXT    NOT NULL,
+    domain       TEXT    NOT NULL
+);
+CREATE INDEX idx_net_event_day ON net_event(local_day);
+"#;
+
+const NET_EVENT_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS net_event (
+    id           INTEGER PRIMARY KEY,
+    started_at   INTEGER NOT NULL,
+    ended_at     INTEGER,
+    duration_ms  INTEGER,
+    local_day    TEXT    NOT NULL,
+    app_name     TEXT    NOT NULL,
+    process_name TEXT    NOT NULL,
+    domain       TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_net_event_day ON net_event(local_day);
 "#;
 
 const SEED_SETTINGS: &[(&str, &str)] = &[
@@ -56,6 +82,12 @@ const SEED_SETTINGS: &[(&str, &str)] = &[
     // also keeps the path. The query string is ALWAYS stripped.
     ("track_urls", "true"),
     ("url_detail", "host"),
+    // Network capture: which apps hold connections to which domains. Domains
+    // come from the local DNS cache; IPs without a cached name are never stored.
+    ("track_network", "true"),
+    ("net_poll_ms", "5000"),
+    // Pause survives restarts; a missing key means tracking is on.
+    ("tracking_paused", "false"),
 ];
 
 // (match_type, pattern, category, priority)
@@ -98,6 +130,12 @@ const SEED_URL_RULES: &[(&str, &str, &str, i64)] = &[
     ("url_keyword", "mail.google.com", "communication", 200),
 ];
 
+const SEED_LAMBDAF_RULES: &[(&str, &str, &str, i64)] = &[
+    ("url_keyword", "lambdaf.org", "code", 200),
+    ("title_keyword", "lambdaforge", "code", 150),
+    ("title_keyword", "lambdaf-org", "code", 150),
+];
+
 pub fn run(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)",
@@ -116,6 +154,7 @@ pub fn run(conn: &Connection) -> Result<()> {
             seed_settings(conn)?;
             seed_rules(conn, SEED_PROCESS_RULES)?;
             seed_rules(conn, SEED_URL_RULES)?;
+            seed_rules(conn, SEED_LAMBDAF_RULES)?;
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [SCHEMA_VERSION],
@@ -123,7 +162,18 @@ pub fn run(conn: &Connection) -> Result<()> {
         }
         Some(1) => {
             migrate_1_to_2(conn)?;
-            conn.execute("UPDATE schema_version SET version = 2", [])?;
+            migrate_2_to_3(conn)?;
+            migrate_3_to_4(conn)?;
+            conn.execute("UPDATE schema_version SET version = 4", [])?;
+        }
+        Some(2) => {
+            migrate_2_to_3(conn)?;
+            migrate_3_to_4(conn)?;
+            conn.execute("UPDATE schema_version SET version = 4", [])?;
+        }
+        Some(3) => {
+            migrate_3_to_4(conn)?;
+            conn.execute("UPDATE schema_version SET version = 4", [])?;
         }
         Some(v) if v < SCHEMA_VERSION => {
             conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
@@ -144,6 +194,20 @@ fn migrate_1_to_2(conn: &Connection) -> Result<()> {
         "UPDATE category_rule SET priority = 50 WHERE match_type='process' AND category='browser'",
         [],
     )?;
+    Ok(())
+}
+
+/// v2 -> v3: per-app network domain segments + their settings.
+fn migrate_2_to_3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(NET_EVENT_TABLE)?;
+    seed_settings(conn)?; // INSERT OR IGNORE — only new keys land
+    Ok(())
+}
+
+/// v3 -> v4: recognize Lambdaforge/Lambdaf work even when Zen only exposes the
+/// page title and not the address bar value.
+fn migrate_3_to_4(conn: &Connection) -> Result<()> {
+    seed_rules(conn, SEED_LAMBDAF_RULES)?;
     Ok(())
 }
 

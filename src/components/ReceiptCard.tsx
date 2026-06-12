@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import type { DaySummary, Receipt } from '@/lib/types';
-import { fmtHM } from '@/lib/api';
+import { fmtHM, fmtHMS } from '@/lib/api';
 
 
 
@@ -27,8 +27,8 @@ export default function ReceiptCard({ s, receipt }: { s: DaySummary; receipt: Re
       </div>
       <hr className="r-rule" />
 
-      <div className="r-line"><span className="lbl">active</span><span className="val">{fmtHM(s.active_ms)}</span></div>
-      <div className="r-line"><span className="lbl">idle</span><span className="val">{fmtHM(s.idle_ms)}</span></div>
+      <div className="r-line"><span className="lbl">active</span><span className="val">{fmtHMS(s.active_ms)}</span></div>
+      <div className="r-line"><span className="lbl">idle</span><span className="val">{fmtHMS(s.idle_ms)}</span></div>
 
       <hr className="r-rule" />
 

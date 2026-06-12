@@ -7,6 +7,7 @@ pub mod browser;
 pub mod foreground;
 pub mod idle;
 pub mod input;
+pub mod network;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -140,6 +141,7 @@ pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>) {
     #[cfg(windows)]
     {
         input::start_listener();
+        network::spawn(db.clone(), paused.clone());
 
         thread::spawn(move || {
             let cfg = {

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityEvent, CategoryRule, DaySummary, Receipt } from './types';
+import type { ActivityEvent, CategoryRule, DaySummary, NetDomainTotal, Receipt } from './types';
 
 export const todayKey = (): string => {
   const d = new Date();
@@ -32,6 +32,7 @@ const call = <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
 export const getDaySummary = (day: string) => call<DaySummary>('get_day_summary', { day });
 export const getReceipt = (day: string) => call<Receipt>('get_receipt', { day });
 export const getEvents = (day: string) => call<ActivityEvent[]>('get_events', { day });
+export const getNetwork = (day: string) => call<NetDomainTotal[]>('get_network', { day });
 export const deleteDay = (day: string) => call<void>('delete_day', { day });
 export const deleteEvent = (id: number) => call<void>('delete_event', { id });
 export const setDayLabel = (day: string, label: string | null) =>
@@ -46,6 +47,14 @@ export const trackingState = () => call<boolean>('tracking_state');
 export const fmtHM = (ms: number): string => {
   const m = Math.floor(ms / 60000);
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+};
+
+export const fmtHMS = (ms: number): string => {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
 };
 
 export const fmtClock = (ms: number): string => {

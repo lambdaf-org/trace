@@ -71,6 +71,15 @@ pub struct SiteTotal {
     pub ms: i64,
 }
 
+/// Connection time an app held to a domain. ms is wall-clock connection time,
+/// not active screen time, so domains can overlap and exceed the day total.
+#[derive(Debug, Clone, Serialize)]
+pub struct NetDomainTotal {
+    pub domain: String,
+    pub ms: i64,
+    pub apps: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Verdict {
     pub line: String,

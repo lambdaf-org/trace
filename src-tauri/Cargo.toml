@@ -33,8 +33,13 @@ windows = { version = "0.58", features = [
   "Win32_UI_Accessibility",
   "Win32_System_Com",
   "Win32_System_Variant",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Dns",
+  "Win32_Networking_WinSock",
+  "Win32_System_LibraryLoader",
 ] }
 
 [profile.release]
 strip = true
 lto = true
+

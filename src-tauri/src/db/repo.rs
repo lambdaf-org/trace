@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use crate::model::{ActivityEvent, CategoryRule};
+use crate::model::{ActivityEvent, CategoryRule, NetDomainTotal};
 
 fn row_to_event(r: &rusqlite::Row) -> rusqlite::Result<ActivityEvent> {
     Ok(ActivityEvent {
@@ -110,6 +110,73 @@ pub fn recover_unclean(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Insert a finalized network segment: one app holding connections to one domain.
+pub fn insert_net_event(
+    conn: &Connection,
+    started_at: i64,
+    ended_at: i64,
+    local_day: &str,
+    app_name: &str,
+    process_name: &str,
+    domain: &str,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO net_event
+           (started_at, ended_at, duration_ms, local_day, app_name, process_name, domain)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            started_at,
+            ended_at,
+            ended_at - started_at,
+            local_day,
+            app_name,
+            process_name,
+            domain,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Extend a still-open network segment. Returns false if the row was removed
+/// (day deleted) while the collector was running.
+pub fn update_net_event(conn: &Connection, id: i64, ended_at: i64) -> Result<bool> {
+    let changed = conn.execute(
+        "UPDATE net_event
+            SET ended_at = ?2,
+                duration_ms = CASE WHEN ?2 > started_at THEN ?2 - started_at ELSE 0 END
+          WHERE id = ?1",
+        params![id, ended_at],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Domains contacted on a day, with total connection time and the apps involved.
+pub fn net_domains_for_day(conn: &Connection, day: &str) -> Result<Vec<NetDomainTotal>> {
+    let mut stmt = conn.prepare(
+        "SELECT domain,
+                SUM(COALESCE(duration_ms, 0)) AS ms,
+                GROUP_CONCAT(DISTINCT app_name) AS apps
+           FROM net_event
+          WHERE local_day = ?1
+          GROUP BY domain
+          ORDER BY ms DESC",
+    )?;
+    let rows = stmt.query_map([day], |r| {
+        Ok(NetDomainTotal {
+            domain: r.get(0)?,
+            ms: r.get(1)?,
+            apps: r
+                .get::<_, Option<String>>(2)?
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect(),
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn events_for_day(conn: &Connection, day: &str) -> Result<Vec<ActivityEvent>> {
     let mut stmt =
         conn.prepare("SELECT * FROM activity_event WHERE local_day = ?1 ORDER BY started_at ASC")?;
@@ -119,7 +186,11 @@ pub fn events_for_day(conn: &Connection, day: &str) -> Result<Vec<ActivityEvent>
 
 pub fn delete_day(conn: &Connection, day: &str) -> Result<()> {
     conn.execute("DELETE FROM activity_event WHERE local_day = ?1", [day])?;
+    conn.execute("DELETE FROM net_event WHERE local_day = ?1", [day])?;
     conn.execute("DELETE FROM day_meta WHERE local_day = ?1", [day])?;
+    // secure_delete zeroes the freed pages; truncating the WAL drops the
+    // copies that lived there, so a deleted day is not recoverable from disk.
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
     Ok(())
 }
 

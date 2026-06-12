@@ -21,8 +21,16 @@ fn main() {
     // Close any segment left open by an unclean shutdown, so we never invent time.
     db::repo::recover_unclean(&conn).expect("crash recovery failed");
 
+    // Pause is a privacy promise; it must survive restarts (dev rebuilds,
+    // autostart at login), so it is restored from settings, not reset to off.
+    let paused_at_start = db::repo::get_setting(&conn, "tracking_paused")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     let db = Arc::new(Mutex::new(conn));
-    let paused = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(paused_at_start));
 
     let collector_db = db.clone();
     let collector_paused = paused.clone();
@@ -46,6 +54,7 @@ fn main() {
                 .build()?;
 
             let tray_paused = paused.clone();
+            let tray_db = db.clone();
             let _tray = TrayIconBuilder::with_id("trace-tray")
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -58,6 +67,13 @@ fn main() {
                     "pause" => {
                         let now = !tray_paused.load(Ordering::Relaxed);
                         tray_paused.store(now, Ordering::Relaxed);
+                        if let Ok(conn) = tray_db.lock() {
+                            let _ = db::repo::set_setting(
+                                &conn,
+                                "tracking_paused",
+                                if now { "true" } else { "false" },
+                            );
+                        }
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -72,6 +88,7 @@ fn main() {
             commands::get_day_summary,
             commands::get_receipt,
             commands::get_events,
+            commands::get_network,
             commands::delete_day,
             commands::delete_event,
             commands::set_day_label,

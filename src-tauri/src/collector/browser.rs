@@ -25,10 +25,20 @@ pub fn strip(raw: &str, detail: &str) -> Option<String> {
         .trim_start_matches("www.");
     // Cut at the first query/fragment marker.
     let no_query = no_scheme.split(['?', '#']).next().unwrap_or(no_scheme);
-    // host is everything before the first slash.
-    let host = no_query.split('/').next().unwrap_or(no_query);
+    // host is everything before the first slash, minus a plain port.
+    let host_port = no_query.split('/').next().unwrap_or(no_query);
+    let host = if let Some(rest) = host_port.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(host_port)
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
     // Reject things that aren't host-like (new tab page, search text, etc.).
-    if host.is_empty() || !host.contains('.') || host.contains(' ') {
+    if host.is_empty()
+        || host.contains(' ')
+        || !(host.eq_ignore_ascii_case("localhost")
+            || host.parse::<std::net::IpAddr>().is_ok()
+            || host.contains('.'))
+    {
         return None;
     }
     let host = host.to_lowercase();
@@ -36,6 +46,33 @@ pub fn strip(raw: &str, detail: &str) -> Option<String> {
         Some(no_query.to_lowercase())
     } else {
         Some(host)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip;
+
+    #[test]
+    fn strips_to_host_without_query_or_port() {
+        assert_eq!(
+            strip("https://github.com/org/repo?x=1", "host"),
+            Some("github.com".into())
+        );
+        assert_eq!(
+            strip("localhost:3000/dashboard?x=1", "host"),
+            Some("localhost".into())
+        );
+        assert_eq!(
+            strip("http://127.0.0.1:3000/", "host"),
+            Some("127.0.0.1".into())
+        );
+    }
+
+    #[test]
+    fn rejects_non_urlish_address_text() {
+        assert_eq!(strip("new tab", "host"), None);
+        assert_eq!(strip("search terms with spaces", "host"), None);
     }
 }
 
@@ -53,11 +90,11 @@ pub fn active_url(_detail: &str) -> Option<String> {
 
 #[cfg(windows)]
 pub fn active_url(detail: &str) -> Option<String> {
-    read_address_bar().and_then(|raw| strip(&raw, detail))
+    read_address_bar(detail)
 }
 
 #[cfg(windows)]
-fn read_address_bar() -> Option<String> {
+fn read_address_bar(detail: &str) -> Option<String> {
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
     };
@@ -87,14 +124,23 @@ fn read_address_bar() -> Option<String> {
             .CreatePropertyCondition(UIA_ControlTypePropertyId, &UIA_EDIT_CONTROL_TYPE_ID.into())
             .ok()?;
 
-        let edit = root.FindFirst(TreeScope_Descendants, &cond).ok()?;
-        let value: IUIAutomationValuePattern = edit.GetCurrentPatternAs(UIA_ValuePatternId).ok()?;
-        let bstr = value.CurrentValue().ok()?;
-        let s = bstr.to_string();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s)
+        let edits = root.FindAll(TreeScope_Descendants, &cond).ok()?;
+        let len = edits.Length().ok()?;
+        for i in 0..len {
+            let edit = edits.GetElement(i).ok()?;
+            let value: IUIAutomationValuePattern =
+                match edit.GetCurrentPatternAs(UIA_ValuePatternId) {
+                    Ok(value) => value,
+                    Err(_) => continue,
+                };
+            let bstr = match value.CurrentValue() {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if let Some(url) = strip(&bstr.to_string(), detail) {
+                return Some(url);
+            }
         }
+        None
     }
 }
