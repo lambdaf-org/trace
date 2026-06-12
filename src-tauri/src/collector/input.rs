@@ -46,7 +46,7 @@ fn accumulate_cursor(x: i32, y: i32) {
 
 #[cfg(windows)]
 pub fn start_listener() {
-    std::thread::spawn(|| unsafe { run() });
+    std::thread::spawn(run);
 }
 
 #[cfg(windows)]
@@ -69,7 +69,7 @@ extern "system" fn wndproc(
     const RIM_KEYBOARD: u32 = 1;
     // Button-down flags.
     const BTN_DOWN: u16 = 0x0001 | 0x0004 | 0x0010; // L | R | M
-                                                    // Keyboard flag: bit0 set => key-up (break).
+    // Keyboard flag: bit0 set => key-up (break).
     const RI_KEY_BREAK: u16 = 0x01;
 
     unsafe {
@@ -121,59 +121,61 @@ extern "system" fn wndproc(
 }
 
 #[cfg(windows)]
-unsafe fn run() {
-    use windows::core::{w, PCWSTR};
-    use windows::Win32::UI::Input::{RegisterRawInputDevices, RAWINPUTDEVICE, RIDEV_INPUTSINK};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DispatchMessageW, GetMessageW, RegisterClassW, SetTimer, TranslateMessage,
-        HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
-    };
+fn run() {
+    unsafe {
+        use windows::Win32::UI::Input::{RAWINPUTDEVICE, RIDEV_INPUTSINK, RegisterRawInputDevices};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, RegisterClassW,
+            SetTimer, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
+        };
+        use windows::core::{PCWSTR, w};
 
-    let class_name = w!("TraceInputSink");
-    let wc = WNDCLASSW {
-        lpfnWndProc: Some(wndproc),
-        lpszClassName: class_name,
-        ..Default::default()
-    };
-    RegisterClassW(&wc);
+        let class_name = w!("TraceInputSink");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(wndproc),
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
 
-    let hwnd = CreateWindowExW(
-        WINDOW_EX_STYLE(0),
-        class_name,
-        PCWSTR::null(),
-        WINDOW_STYLE(0),
-        0,
-        0,
-        0,
-        0,
-        HWND_MESSAGE,
-        None,
-        None,
-        None,
-    )
-    .unwrap_or_default();
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            class_name,
+            PCWSTR::null(),
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            None,
+            None,
+            None,
+        )
+        .unwrap_or_default();
 
-    let devices = [
-        RAWINPUTDEVICE {
-            usUsagePage: 0x01,
-            usUsage: 0x06, // keyboard
-            dwFlags: RIDEV_INPUTSINK,
-            hwndTarget: hwnd,
-        },
-        RAWINPUTDEVICE {
-            usUsagePage: 0x01,
-            usUsage: 0x02, // mouse
-            dwFlags: RIDEV_INPUTSINK,
-            hwndTarget: hwnd,
-        },
-    ];
-    let _ = RegisterRawInputDevices(&devices, std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+        let devices = [
+            RAWINPUTDEVICE {
+                usUsagePage: 0x01,
+                usUsage: 0x06, // keyboard
+                dwFlags: RIDEV_INPUTSINK,
+                hwndTarget: hwnd,
+            },
+            RAWINPUTDEVICE {
+                usUsagePage: 0x01,
+                usUsage: 0x02, // mouse
+                dwFlags: RIDEV_INPUTSINK,
+                hwndTarget: hwnd,
+            },
+        ];
+        let _ = RegisterRawInputDevices(&devices, std::mem::size_of::<RAWINPUTDEVICE>() as u32);
 
-    SetTimer(hwnd, 1, 100, None); // ~10Hz cursor sampling
+        SetTimer(hwnd, 1, 100, None); // ~10Hz cursor sampling
 
-    let mut msg = MSG::default();
-    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-        let _ = TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 }
