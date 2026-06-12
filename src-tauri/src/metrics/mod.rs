@@ -9,6 +9,7 @@ use anyhow::Result;
 use chrono::{Local, TimeZone, Timelike};
 use rusqlite::Connection;
 
+use crate::collector::{self, browser};
 use crate::db::repo;
 use crate::model::{ActivityEvent, AppTotal, CategoryTotal, DaySummary, Receipt, SiteTotal};
 
@@ -36,6 +37,14 @@ fn host_of(url: &str) -> String {
     url.split('/').next().unwrap_or(url).to_string()
 }
 
+fn browser_processes(conn: &Connection) -> Vec<String> {
+    let extra = repo::get_setting(conn, "browser_processes")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    browser::browser_processes(&extra)
+}
+
 pub fn day_summary(conn: &Connection, day: &str) -> Result<DaySummary> {
     let events = repo::events_for_day(conn, day)?;
 
@@ -56,7 +65,7 @@ pub fn day_summary(conn: &Connection, day: &str) -> Result<DaySummary> {
         .collect::<Vec<_>>();
 
     let top_apps = {
-        let mut v = group(&events, |e| Some(e.app_name.clone()))
+        let mut v = group(&events, |e| Some(collector::friendly(&e.process_name)))
             .into_iter()
             .map(|(app_name, ms)| AppTotal { app_name, ms })
             .collect::<Vec<_>>();
@@ -64,11 +73,17 @@ pub fn day_summary(conn: &Connection, day: &str) -> Result<DaySummary> {
         v
     };
 
+    let browsers = browser_processes(conn);
     let top_sites = {
-        let mut v = group(&events, |e| e.url.as_deref().map(host_of))
-            .into_iter()
-            .map(|(host, ms)| SiteTotal { host, ms })
-            .collect::<Vec<_>>();
+        let mut v = group(&events, |e| {
+            e.url.as_deref().map(host_of).or_else(|| {
+                browser::is_browser(&e.process_name, &browsers)
+                    .then(|| "uncaptured browser".to_string())
+            })
+        })
+        .into_iter()
+        .map(|(host, ms)| SiteTotal { host, ms })
+        .collect::<Vec<_>>();
         v.truncate(10);
         v
     };
@@ -130,7 +145,9 @@ fn count_switches(events: &[ActivityEvent]) -> i64 {
     let active: Vec<&ActivityEvent> = events.iter().filter(|e| !e.is_idle).collect();
     active
         .windows(2)
-        .filter(|w| w[0].app_name != w[1].app_name)
+        .filter(|w| {
+            collector::friendly(&w[0].process_name) != collector::friendly(&w[1].process_name)
+        })
         .count() as i64
 }
 

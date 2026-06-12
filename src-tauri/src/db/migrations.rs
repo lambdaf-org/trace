@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA_LATEST: &str = r#"
 CREATE TABLE activity_event (
@@ -82,6 +82,10 @@ const SEED_SETTINGS: &[(&str, &str)] = &[
     // also keeps the path. The query string is ALWAYS stripped.
     ("track_urls", "true"),
     ("url_detail", "host"),
+    // Additional comma-separated browser process names. The collector already
+    // has a broad built-in Chromium/Firefox list; this is the local escape
+    // hatch for niche/new browsers without a code release.
+    ("browser_processes", ""),
     // Network capture: which apps hold connections to which domains. Domains
     // come from the local DNS cache; IPs without a cached name are never stored.
     ("track_network", "true"),
@@ -164,16 +168,23 @@ pub fn run(conn: &Connection) -> Result<()> {
             migrate_1_to_2(conn)?;
             migrate_2_to_3(conn)?;
             migrate_3_to_4(conn)?;
-            conn.execute("UPDATE schema_version SET version = 4", [])?;
+            migrate_4_to_5(conn)?;
+            conn.execute("UPDATE schema_version SET version = 5", [])?;
         }
         Some(2) => {
             migrate_2_to_3(conn)?;
             migrate_3_to_4(conn)?;
-            conn.execute("UPDATE schema_version SET version = 4", [])?;
+            migrate_4_to_5(conn)?;
+            conn.execute("UPDATE schema_version SET version = 5", [])?;
         }
         Some(3) => {
             migrate_3_to_4(conn)?;
-            conn.execute("UPDATE schema_version SET version = 4", [])?;
+            migrate_4_to_5(conn)?;
+            conn.execute("UPDATE schema_version SET version = 5", [])?;
+        }
+        Some(4) => {
+            migrate_4_to_5(conn)?;
+            conn.execute("UPDATE schema_version SET version = 5", [])?;
         }
         Some(v) if v < SCHEMA_VERSION => {
             conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
@@ -208,6 +219,12 @@ fn migrate_2_to_3(conn: &Connection) -> Result<()> {
 /// page title and not the address bar value.
 fn migrate_3_to_4(conn: &Connection) -> Result<()> {
     seed_rules(conn, SEED_LAMBDAF_RULES)?;
+    Ok(())
+}
+
+/// v4 -> v5: configurable browser process allow-list for URL capture.
+fn migrate_4_to_5(conn: &Connection) -> Result<()> {
+    seed_settings(conn)?;
     Ok(())
 }
 
