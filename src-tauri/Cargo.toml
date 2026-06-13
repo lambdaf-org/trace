@@ -18,8 +18,8 @@ serde_json = "1"
 chrono = "0.4"
 anyhow = "1"
 
-# OS collector is Windows-only for V0. Exact feature flags track the installed
-# `windows` crate version — the compiler will name any that are missing.
+# OS collector, Windows. Exact feature flags track the installed `windows`
+# crate version — the compiler will name any that are missing.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Foundation",
@@ -35,6 +35,16 @@ windows = { version = "0.58", features = [
   "Win32_System_Variant",
   "Win32_System_LibraryLoader",
 ] }
+
+# OS collector, macOS. Frontmost app via NSWorkspace (objc2), window title via
+# the Accessibility API (raw framework FFI, declared in foreground.rs), idle via
+# CoreGraphics, and global input counts via a CGEventTap. The CGEventTap wiring
+# is the most version-sensitive code against `core-graphics`; if a symbol does
+# not resolve, check that crate's `event` module.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-graphics = "0.24"
+objc2 = "0.6"
 
 [profile.release]
 strip = true

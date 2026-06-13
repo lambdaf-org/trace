@@ -4,7 +4,7 @@
 
 ![Rust](https://img.shields.io/badge/Rust-1.x-orange?logo=rust&logoColor=white)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![Local only](https://img.shields.io/badge/cloud-none-success)
 
 Trace is a local-only activity recorder for people who build. It watches which app is in front of you, how long you stay there, and how much you type and click — then turns the day into a plain-text **receipt** that shows its work: every number carries the arithmetic that produced it, and a verdict it can defend from the tally.
@@ -18,7 +18,7 @@ No account. No cloud. No sync. No analytics or telemetry. It never stores typed 
 
 ## Quickstart
 
-Prerequisites: a [Rust toolchain](https://rustup.rs), [Node 18+](https://nodejs.org), and on Windows the MSVC build tools + WebView2 (preinstalled on Windows 11).
+Prerequisites: a [Rust toolchain](https://rustup.rs), [Node 18+](https://nodejs.org), and the native build tools for your OS — on Windows the MSVC build tools + WebView2 (preinstalled on Windows 11), on macOS the Xcode Command Line Tools (`xcode-select --install`).
 
 ```
 git clone https://github.com/lambdaf-org/trace
@@ -27,13 +27,21 @@ npm install
 npm run tauri dev
 ```
 
-The database lives in the local OS app-data dir (`%LOCALAPPDATA%/org.lambdaf.trace/trace.db` on Windows). Trace also exposes this path in the Privacy & Data section, with an "Open data folder" button.
+The database lives in the local OS app-data dir — `%LOCALAPPDATA%/org.lambdaf.trace/trace.db` on Windows, `~/Library/Application Support/org.lambdaf.trace/trace.db` on macOS. Trace also exposes this path in the Privacy & Data section, with an "Open data folder" button.
 
-Build a Windows installer:
+### macOS permissions
+
+macOS gates the signals Trace reads behind per-app permissions (System Settings → Privacy & Security). Each is requested on first use and Trace degrades gracefully if denied — it simply omits that one signal:
+
+- **Accessibility** — required for window titles (when enabled) and to count keystrokes/clicks. Without it, app + duration are still recorded.
+- **Input Monitoring** — may also be requested for the global keyboard/mouse counters.
+- **Automation** (Apple Events) — required to read the active browser tab's domain. Granted per browser the first time Trace asks. Firefox/Gecko browsers don't expose the URL this way, so domains aren't recorded for them.
+
+Build an installer (produces the current platform's bundles — NSIS + MSI on Windows, `.app` + `.dmg` on macOS):
 
 ```
 npm run tauri icon assets/logo.png   # one-time, generates icons/
-npm run tauri build                   # produces an NSIS + MSI bundle
+npm run tauri build
 ```
 
 ## What Trace records / never records
@@ -80,11 +88,11 @@ Metrics are computed deterministically over a day's ordered segments — active/
 
 ## Privacy
 
-Trace is built so the privacy claims are structural, not promises. The collector uses only unprivileged Win32 calls — no driver, no injection, no admin. Input is counted, never captured. The runtime app has no analytics, telemetry, cloud sync, crash reporter, remote logger, or external font/script request. Everything stays in the local app-data SQLite database. The full record-vs-never list is in [docs/PRIVACY.md](docs/PRIVACY.md), and the implementation plan is in [docs/PLAN.md](docs/PLAN.md).
+Trace is built so the privacy claims are structural, not promises. The collector uses only unprivileged OS calls — Win32 on Windows, and NSWorkspace + the Accessibility API + Apple Events on macOS — with no driver, no injection, no admin. Input is counted, never captured. The runtime app has no analytics, telemetry, cloud sync, crash reporter, remote logger, or external font/script request. Everything stays in the local app-data SQLite database. The full record-vs-never list is in [docs/PRIVACY.md](docs/PRIVACY.md), and the implementation plan is in [docs/PLAN.md](docs/PLAN.md).
 
 ## Roadmap
 
-V0 is Windows-first and deliberately small. Browser-**domain** tracking ships in V0 (read from the address bar via UI Automation, query strings stripped, host-only by default). Future work should keep the same default: local-only, no accounts, no telemetry, no screenshots, and richer capture only behind explicit opt-in settings. macOS and Linux collectors are possible behind the same segmenter.
+Trace runs on Windows and macOS, sharing one segmenter behind per-OS collectors. Browser-**domain** tracking is read from the address bar via UI Automation on Windows and via Apple Events on macOS, query strings stripped, host-only by default. Future work should keep the same default: local-only, no accounts, no telemetry, no screenshots, and richer capture only behind explicit opt-in settings. A Linux collector is possible behind the same segmenter.
 
 Browser private/incognito windows are not reliably distinguishable from regular windows by the OS collector. If a browser exposes a domain in the address bar, Trace can store that domain under the same host-only rules.
 

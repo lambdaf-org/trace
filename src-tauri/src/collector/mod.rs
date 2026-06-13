@@ -143,14 +143,14 @@ fn persist_segment(db: &Arc<Mutex<Connection>>, seg: &mut OpenSegment, ended_at:
 }
 
 pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>, data_epoch: Arc<AtomicU64>) {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (&db, &paused, &data_epoch);
-        eprintln!("[trace] collector is Windows-only in V0; running without capture.");
+        eprintln!("[trace] collector supports Windows and macOS only; running without capture.");
         return;
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         input::start_listener();
 
@@ -195,7 +195,7 @@ pub fn spawn(db: Arc<Mutex<Connection>>, paused: Arc<AtomicBool>, data_epoch: Ar
                             let url = if cfg.track_urls
                                 && browser::is_browser(&p, &cfg.browser_processes)
                             {
-                                browser::active_url(&cfg.url_detail)
+                                browser::active_url(&cfg.url_detail, &p)
                             } else {
                                 None
                             };

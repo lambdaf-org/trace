@@ -114,7 +114,25 @@ pub fn events_for_day(conn: &Connection, day: &str) -> Result<Vec<ActivityEvent>
     let mut stmt =
         conn.prepare("SELECT * FROM activity_event WHERE local_day = ?1 ORDER BY started_at ASC")?;
     let rows = stmt.query_map([day], row_to_event)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut events = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+
+    // Re-resolve the category on read rather than trusting the value frozen at
+    // capture time. This makes the timeline and the focus ratio self-healing:
+    // events recorded before a rule or the built-in app map existed (e.g. macOS
+    // apps captured by an older build) are categorized with the current logic
+    // without needing a data migration. Idle stays idle.
+    let rules = list_category_rules(conn).unwrap_or_default();
+    for e in events.iter_mut() {
+        if !e.is_idle {
+            e.category = categorize_with(
+                &rules,
+                &e.process_name,
+                e.window_title.as_deref(),
+                e.url.as_deref(),
+            );
+        }
+    }
+    Ok(events)
 }
 
 pub fn delete_day(conn: &Connection, day: &str) -> Result<()> {
@@ -278,7 +296,54 @@ pub fn delete_category_rule(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Resolve a category from the rules table: title keywords first, then process.
+/// Built-in process -> category fallback, keyed by a normalized app name
+/// (lowercased, with any trailing ".exe" removed). This is what makes
+/// categorization work without relying on the seeded rule rows being present or
+/// on a per-OS exact match: Windows reports "Code.exe", macOS reports the
+/// localized "Code" or "Visual Studio Code", and both normalize into this map.
+/// User-defined rules in the DB still take precedence — this only runs when no
+/// rule matched.
+fn builtin_category(process_name: &str) -> Option<&'static str> {
+    let norm = process_name
+        .trim()
+        .to_lowercase()
+        .strip_suffix(".exe")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| process_name.trim().to_lowercase());
+
+    let cat = match norm.as_str() {
+        // editors / IDEs
+        "code" | "visual studio code" | "vscode" | "code - insiders" | "vscodium"
+        | "cursor" | "windsurf" | "zed" | "devenv" | "visual studio"
+        | "idea64" | "idea" | "intellij idea" | "pycharm" | "pycharm64"
+        | "webstorm" | "goland" | "clion" | "rider" | "rustrover" | "phpstorm"
+        | "datagrip" | "android studio" | "xcode" | "sublime text" | "sublime_text"
+        | "atom" | "nova" | "neovim" | "nvim" | "vim" | "macvim" | "emacs" => "code",
+        // terminals
+        "terminal" | "apple terminal" | "windowsterminal" | "windows terminal"
+        | "iterm" | "iterm2" | "warp" | "alacritty" | "kitty" | "wezterm"
+        | "ghostty" | "hyper" | "tabby" | "powershell" | "pwsh" | "cmd" => "terminal",
+        // browsers
+        "chrome" | "google chrome" | "chromium" | "msedge" | "microsoft edge"
+        | "firefox" | "firefox developer edition" | "safari" | "safari technology preview"
+        | "arc" | "brave" | "brave browser" | "opera" | "opera gx" | "vivaldi"
+        | "zen" | "duckduckgo" | "floorp" | "librewolf" | "mullvad browser"
+        | "mullvadbrowser" | "pale moon" | "palemoon" | "waterfox" | "orion" => "browser",
+        // communication
+        "slack" | "discord" | "teams" | "microsoft teams" | "zoom" | "zoom.us"
+        | "telegram" | "whatsapp" | "signal" => "communication",
+        // design
+        "figma" | "sketch" | "adobe xd" | "photoshop" | "illustrator" => "design",
+        // video
+        "vlc" | "mpv" | "quicktime player" | "iina" => "video",
+        _ => return None,
+    };
+    Some(cat)
+}
+
+/// Resolve a category from the rules table: title keywords first, then process,
+/// then a built-in app map. Loads the rules itself; see [`categorize_with`] for
+/// the hot path that reuses an already-loaded rule set.
 pub fn categorize(
     conn: &Connection,
     process_name: &str,
@@ -286,6 +351,18 @@ pub fn categorize(
     url: Option<&str>,
 ) -> String {
     let rules = list_category_rules(conn).unwrap_or_default();
+    categorize_with(&rules, process_name, title, url)
+}
+
+/// Same as [`categorize`] but against a caller-supplied rule set, so a batch
+/// (e.g. a whole day of events) can resolve categories without re-querying the
+/// rules table for every row.
+pub fn categorize_with(
+    rules: &[CategoryRule],
+    process_name: &str,
+    title: Option<&str>,
+    url: Option<&str>,
+) -> String {
     let proc_l = process_name.to_lowercase();
     let title_l = title.unwrap_or("").to_lowercase();
     let url_l = url.unwrap_or("").to_lowercase();
@@ -306,7 +383,12 @@ pub fn categorize(
             return r.category.clone();
         }
     }
-    "unknown".to_string()
+    // No user/seeded rule matched: fall back to the built-in app map so common
+    // editors/terminals/browsers are recognized even on a DB that never got the
+    // platform's seed rules.
+    builtin_category(process_name)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]
@@ -374,5 +456,46 @@ mod tests {
             Some("false".to_string())
         );
         assert!(!list_category_rules(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn macos_app_names_categorize_as_productive() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrations::run(&conn).unwrap();
+
+        // macOS reports the localized app name, not an .exe filename.
+        assert_eq!(categorize(&conn, "Visual Studio Code", None, None), "code");
+        assert_eq!(categorize(&conn, "Terminal", None, None), "terminal");
+        assert_eq!(categorize(&conn, "Safari", None, None), "browser");
+        assert_eq!(categorize(&conn, "Slack", None, None), "communication");
+    }
+
+    #[test]
+    fn builtin_map_categorizes_without_any_rules() {
+        // No DB rules at all: the built-in app map must still recognize common
+        // editors/terminals across both naming conventions.
+        let rules: Vec<CategoryRule> = vec![];
+        assert_eq!(categorize_with(&rules, "Cursor", None, None), "code");
+        assert_eq!(categorize_with(&rules, "Code.exe", None, None), "code");
+        assert_eq!(categorize_with(&rules, "iTerm2", None, None), "terminal");
+        assert_eq!(categorize_with(&rules, "Ghostty", None, None), "terminal");
+        assert_eq!(categorize_with(&rules, "Totally Unknown App", None, None), "unknown");
+    }
+
+    #[test]
+    fn events_for_day_reresolves_stale_categories() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrations::run(&conn).unwrap();
+
+        // Simulate a macOS event recorded by an older build: stored as 'unknown'.
+        insert_event(
+            &conn, 1_000, 2_000, "2026-06-13", "Code", "Code", None, None, "unknown", 0, 0, 0.0,
+            false,
+        )
+        .unwrap();
+
+        let events = events_for_day(&conn, "2026-06-13").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].category, "code");
     }
 }

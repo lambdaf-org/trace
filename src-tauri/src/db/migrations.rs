@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 8;
 
 const SCHEMA_LATEST: &str = r#"
 CREATE TABLE activity_event (
@@ -84,6 +84,36 @@ const SEED_PROCESS_RULES: &[(&str, &str, &str, i64)] = &[
     ("process", "vlc.exe", "video", 100),
 ];
 
+// macOS process names are the app's localizedName (from NSWorkspace), not an
+// executable filename. categorize() matches the process name exactly, so without
+// these every native macOS app falls through to 'unknown' and never counts as
+// productive time. Seeded alongside the Windows rules on every platform — the
+// names don't collide, so the wrong-OS rules simply never match.
+const SEED_PROCESS_RULES_MACOS: &[(&str, &str, &str, i64)] = &[
+    ("process", "Visual Studio Code", "code", 100),
+    ("process", "Code", "code", 100),
+    ("process", "Xcode", "code", 100),
+    ("process", "IntelliJ IDEA", "code", 100),
+    ("process", "Terminal", "terminal", 100),
+    ("process", "iTerm2", "terminal", 100),
+    ("process", "Warp", "terminal", 100),
+    ("process", "Safari", "browser", 50),
+    ("process", "Google Chrome", "browser", 50),
+    ("process", "Chromium", "browser", 50),
+    ("process", "Firefox", "browser", 50),
+    ("process", "Arc", "browser", 50),
+    ("process", "Brave Browser", "browser", 50),
+    ("process", "Microsoft Edge", "browser", 50),
+    ("process", "Opera", "browser", 50),
+    ("process", "Vivaldi", "browser", 50),
+    ("process", "Zen", "browser", 50),
+    ("process", "Slack", "communication", 100),
+    ("process", "Discord", "communication", 100),
+    ("process", "Microsoft Teams", "communication", 100),
+    ("process", "Figma", "design", 100),
+    ("process", "VLC", "video", 100),
+];
+
 // URL rules outrank process rules (priority 200) so a browser on localhost is
 // 'code', not 'browser'. This is what finally makes the focus ratio honest.
 const SEED_URL_RULES: &[(&str, &str, &str, i64)] = &[
@@ -127,6 +157,7 @@ pub fn run(conn: &Connection) -> Result<()> {
             conn.execute_batch(SCHEMA_LATEST)?;
             seed_settings(conn)?;
             seed_rules(conn, SEED_PROCESS_RULES)?;
+            seed_rules(conn, SEED_PROCESS_RULES_MACOS)?;
             seed_rules(conn, SEED_URL_RULES)?;
             seed_rules(conn, SEED_LAMBDAF_RULES)?;
             conn.execute(
@@ -140,29 +171,48 @@ pub fn run(conn: &Connection) -> Result<()> {
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
             migrate_5_to_6(conn)?;
-            conn.execute("UPDATE schema_version SET version = 6", [])?;
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
         }
         Some(2) => {
             migrate_2_to_3(conn)?;
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
             migrate_5_to_6(conn)?;
-            conn.execute("UPDATE schema_version SET version = 6", [])?;
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
         }
         Some(3) => {
             migrate_3_to_4(conn)?;
             migrate_4_to_5(conn)?;
             migrate_5_to_6(conn)?;
-            conn.execute("UPDATE schema_version SET version = 6", [])?;
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
         }
         Some(4) => {
             migrate_4_to_5(conn)?;
             migrate_5_to_6(conn)?;
-            conn.execute("UPDATE schema_version SET version = 6", [])?;
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
         }
         Some(5) => {
             migrate_5_to_6(conn)?;
-            conn.execute("UPDATE schema_version SET version = 6", [])?;
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
+        }
+        Some(6) => {
+            migrate_6_to_7(conn)?;
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
+        }
+        Some(7) => {
+            migrate_7_to_8(conn)?;
+            conn.execute("UPDATE schema_version SET version = 8", [])?;
         }
         Some(v) if v < SCHEMA_VERSION => {
             conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
@@ -215,6 +265,63 @@ fn migrate_5_to_6(conn: &Connection) -> Result<()> {
         [],
     )?;
     conn.execute("DROP TABLE IF EXISTS net_event", [])?;
+    Ok(())
+}
+
+/// v6 -> v7: macOS support. Existing databases predate the macOS process rules,
+/// so native Mac apps were categorized as 'unknown' and never counted toward
+/// productive time. Add the rules without disturbing recorded history. Only
+/// inserts rules that aren't already present, so a Windows DB that somehow has
+/// them (or a re-run) won't accumulate duplicates.
+fn migrate_6_to_7(conn: &Connection) -> Result<()> {
+    for (mt, pat, cat, prio) in SEED_PROCESS_RULES_MACOS {
+        let exists: bool = conn.query_row(
+            "SELECT 1 FROM category_rule WHERE match_type = ?1 AND pattern = ?2 LIMIT 1",
+            rusqlite::params![mt, pat],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+        if !exists {
+            conn.execute(
+                "INSERT INTO category_rule (match_type, pattern, category, priority) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![mt, pat, cat, prio],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// v7 -> v8: re-categorize history. Adding the macOS rules in v6->v7 only
+/// affects events recorded afterwards; everything captured before stayed
+/// 'unknown' (the category is written once, at capture time). Re-run the rules
+/// over existing non-idle events so past macOS activity counts as productive
+/// too. Idle events keep their 'idle' category. Safe to skip on a brand-new DB
+/// (no rows yet) and idempotent — re-running just recomputes the same values.
+fn migrate_7_to_8(conn: &Connection) -> Result<()> {
+    let rows: Vec<(i64, String, Option<String>, Option<String>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, process_name, window_title, url
+               FROM activity_event WHERE is_idle = 0",
+        )?;
+        let mapped = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        mapped.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for (id, process, title, url) in rows {
+        let category =
+            crate::db::repo::categorize(conn, &process, title.as_deref(), url.as_deref());
+        conn.execute(
+            "UPDATE activity_event SET category = ?1 WHERE id = ?2",
+            rusqlite::params![category, id],
+        )?;
+    }
     Ok(())
 }
 

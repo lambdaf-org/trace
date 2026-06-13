@@ -24,15 +24,15 @@ pub fn snapshot() -> (u64, u64, u64) {
     )
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn start_listener() {}
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 static LAST_X: AtomicU64 = AtomicU64::new(u64::MAX);
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 static LAST_Y: AtomicU64 = AtomicU64::new(u64::MAX);
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn accumulate_cursor(x: i32, y: i32) {
     let lx = LAST_X.swap(x as i64 as u64, Ordering::Relaxed);
     let ly = LAST_Y.swap(y as i64 as u64, Ordering::Relaxed);
@@ -178,4 +178,87 @@ fn run() {
             DispatchMessageW(&msg);
         }
     }
+}
+
+// macOS input counters via a CGEventTap. Like the Windows Raw Input handler,
+// the callback only ever *increments* a counter — it never inspects which key
+// fired. Mouse travel is accumulated from the event location (pixels), never
+// stored as a position. The tap requires Accessibility/Input-Monitoring
+// permission; without it the tap fails to create and counts stay at zero, which
+// the rest of the collector tolerates.
+//
+// NOTE: the `CGEventTap` construction and run-loop wiring are the most
+// version-sensitive lines against the `core-graphics` crate; if a symbol does
+// not resolve, check that crate's `event` module.
+#[cfg(target_os = "macos")]
+pub fn start_listener() {
+    std::thread::spawn(run);
+}
+
+#[cfg(target_os = "macos")]
+fn run() {
+    use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
+    use core_graphics::event::{
+        CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+    };
+
+    let current = CFRunLoop::get_current();
+
+    let tap = CGEventTap::new(
+        CGEventTapLocation::HID,
+        CGEventTapPlacement::HeadInsertEventTap,
+        CGEventTapOptions::ListenOnly,
+        vec![
+            CGEventType::KeyDown,
+            CGEventType::LeftMouseDown,
+            CGEventType::RightMouseDown,
+            CGEventType::OtherMouseDown,
+            CGEventType::MouseMoved,
+            CGEventType::LeftMouseDragged,
+            CGEventType::RightMouseDragged,
+        ],
+        |_proxy, event_type, event| {
+            match event_type {
+                CGEventType::KeyDown => {
+                    KEYS.fetch_add(1, Ordering::Relaxed);
+                }
+                CGEventType::LeftMouseDown
+                | CGEventType::RightMouseDown
+                | CGEventType::OtherMouseDown => {
+                    CLICKS.fetch_add(1, Ordering::Relaxed);
+                }
+                CGEventType::MouseMoved
+                | CGEventType::LeftMouseDragged
+                | CGEventType::RightMouseDragged => {
+                    let p = event.location();
+                    accumulate_cursor(p.x as i32, p.y as i32);
+                }
+                _ => {}
+            }
+            // ListenOnly: the return value is ignored, pass the event through.
+            None
+        },
+    );
+
+    let tap = match tap {
+        Ok(tap) => tap,
+        Err(_) => {
+            eprintln!(
+                "[trace] could not create event tap; grant Accessibility / Input Monitoring \
+                 permission to count keys and clicks. Continuing without input counts."
+            );
+            return;
+        }
+    };
+
+    let loop_source = match tap.mach_port.create_runloop_source(0) {
+        Ok(source) => source,
+        Err(_) => return,
+    };
+
+    unsafe {
+        current.add_source(&loop_source, kCFRunLoopCommonModes);
+    }
+    tap.enable();
+    CFRunLoop::run_current();
 }
