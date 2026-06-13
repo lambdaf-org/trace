@@ -1,6 +1,6 @@
 {
   "name": "trace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Local-only computer activity receipts for builders.",
   "scripts": {
