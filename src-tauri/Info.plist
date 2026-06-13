@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required so Trace may ask the active browser for the current tab's URL
+	     over Apple Events. Only the domain is kept; URLs never leave the machine.
+	     Without this key macOS terminates the app when it sends an Apple event. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Trace reads the active browser tab's address to record only the domain you are visiting. This stays on your machine.</string>
+</dict>
+</plist>

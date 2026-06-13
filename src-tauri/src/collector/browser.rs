@@ -49,6 +49,11 @@ pub fn strip(raw: &str, detail: &str) -> Option<String> {
     }
 }
 
+// On Windows the foreground identity is the executable file name; on macOS it is
+// the application's localized name (e.g. "Google Chrome"). The default list and
+// the normalizer therefore differ per platform, but `browser_processes` and
+// `is_browser` below stay identical.
+#[cfg(not(target_os = "macos"))]
 const DEFAULT_BROWSER_PROCESSES: &[&str] = &[
     // Chromium family
     "arc.exe",
@@ -79,6 +84,36 @@ const DEFAULT_BROWSER_PROCESSES: &[&str] = &[
     "zen.exe",
 ];
 
+#[cfg(target_os = "macos")]
+const DEFAULT_BROWSER_PROCESSES: &[&str] = &[
+    // Chromium family
+    "arc",
+    "brave browser",
+    "google chrome",
+    "google chrome canary",
+    "chromium",
+    "duckduckgo",
+    "microsoft edge",
+    "opera",
+    "opera gx",
+    "sidekick",
+    "vivaldi",
+    "whale",
+    "yandex",
+    // Firefox / Gecko family
+    "basilisk",
+    "firefox",
+    "floorp",
+    "librewolf",
+    "mullvad browser",
+    "pale moon",
+    "seamonkey",
+    "tor browser",
+    "waterfox",
+    "zen",
+];
+
+#[cfg(not(target_os = "macos"))]
 fn normalize_process_name(process: &str) -> Option<String> {
     let p = process.trim().to_lowercase();
     if p.is_empty() || p.contains('\\') || p.contains('/') {
@@ -89,6 +124,15 @@ fn normalize_process_name(process: &str) -> Option<String> {
     } else {
         format!("{p}.exe")
     })
+}
+
+#[cfg(target_os = "macos")]
+fn normalize_process_name(process: &str) -> Option<String> {
+    let p = process.trim().to_lowercase();
+    if p.is_empty() {
+        return None;
+    }
+    Some(p)
 }
 
 pub fn browser_processes(extra: &str) -> Vec<String> {
@@ -111,6 +155,9 @@ pub fn is_browser(process: &str, browsers: &[String]) -> bool {
     browsers.iter().any(|p| p == &process)
 }
 
+// Used only by the Windows UI Automation fallback below; kept compiled under
+// `test` so its unit test runs on any host.
+#[cfg(any(windows, test))]
 fn looks_like_address_control(name: &str, automation_id: &str) -> bool {
     let haystack = format!("{name} {automation_id}").to_lowercase();
     [
@@ -152,6 +199,7 @@ mod tests {
         assert_eq!(strip("search terms with spaces", "host"), None);
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn recognizes_default_and_configured_browser_processes() {
         let browsers = browser_processes("custombrowser, Weird.exe, chrome.exe");
@@ -160,6 +208,18 @@ mod tests {
         assert!(is_browser("custombrowser.exe", &browsers));
         assert!(is_browser("weird.exe", &browsers));
         assert!(!is_browser("code.exe", &browsers));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn recognizes_default_and_configured_browser_processes() {
+        // On macOS the identity is the app's localized name, not an .exe.
+        let browsers = browser_processes("Custom Browser, Vivaldi");
+        assert!(is_browser("Google Chrome", &browsers));
+        assert!(is_browser("LibreWolf", &browsers));
+        assert!(is_browser("Custom Browser", &browsers));
+        assert!(is_browser("Vivaldi", &browsers));
+        assert!(!is_browser("Code", &browsers));
     }
 
     #[test]
@@ -174,14 +234,89 @@ mod tests {
     }
 }
 
-#[cfg(not(windows))]
-pub fn active_url(_detail: &str) -> Option<String> {
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn active_url(_detail: &str, _app: &str) -> Option<String> {
     None
 }
 
 #[cfg(windows)]
-pub fn active_url(detail: &str) -> Option<String> {
+pub fn active_url(detail: &str, _app: &str) -> Option<String> {
     read_address_bar(detail)
+}
+
+// macOS reads the active tab's URL by asking the browser over Apple Events
+// (AppleScript), rather than inspecting any window contents. The query string
+// and fragment are dropped by `strip` before anything is stored. Apple Events
+// require the user to grant Automation permission for Trace -> the browser; the
+// first request triggers the system prompt, and a denial just yields `None`.
+#[cfg(target_os = "macos")]
+pub fn active_url(detail: &str, app: &str) -> Option<String> {
+    let script = applescript_for_browser(app)?;
+    let raw = run_osascript(&script)?;
+    strip(&raw, detail)
+}
+
+#[cfg(target_os = "macos")]
+fn applescript_for_browser(app: &str) -> Option<String> {
+    let a = app.to_lowercase();
+
+    // Gecko browsers do not expose the current tab's URL over AppleScript, so we
+    // cannot read them without inspecting window contents — which we refuse to do.
+    const GECKO: &[&str] = &[
+        "firefox",
+        "zen",
+        "floorp",
+        "librewolf",
+        "waterfox",
+        "tor browser",
+        "mullvad browser",
+        "seamonkey",
+        "pale moon",
+        "basilisk",
+    ];
+    if GECKO.iter().any(|g| a.contains(g)) {
+        return None;
+    }
+
+    // Safari names the active tab "current tab"; the Chromium family uses
+    // "active tab". Both answer to the app's own localized name.
+    if a.contains("safari") {
+        Some(format!(
+            "tell application \"{app}\" to return URL of current tab of front window"
+        ))
+    } else {
+        Some(format!(
+            "tell application \"{app}\" to return URL of active tab of front window"
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_osascript(script: &str) -> Option<String> {
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        // Surface the real reason once, not every poll, so the cause is visible
+        // without spamming the log. The usual culprit is the Automation
+        // permission: "Not authorized to send Apple events" (-1743), which means
+        // the user must allow Trace to control the browser under System Settings
+        // -> Privacy & Security -> Automation. A missing Info.plist (running the
+        // unbundled dev binary) produces the same denial.
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            let err = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[trace] browser URL via osascript failed: {}", err.trim());
+        }
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if url.is_empty() { None } else { Some(url) }
 }
 
 #[cfg(windows)]
