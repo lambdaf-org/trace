@@ -7,9 +7,9 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![Local only](https://img.shields.io/badge/cloud-none-success)
 
-Trace is a local-only activity recorder for people who build. It watches which app is in front of you, how long you stay there, and how much you type and click — then turns the day into a plain-text **receipt** that shows its work: every number carries the arithmetic that produced it, and a verdict it can defend from the tally.
+Trace is a local-only activity recorder. It watches which app is in front of you, how long you stay there, and how much you type and click, then turns the day into a plain-text **receipt**
 
-No account. No cloud. No sync. No analytics or telemetry. It never stores typed text, screenshots, the clipboard, packet contents, or full URLs by default — only local metadata, in one SQLite file on your disk that you can inspect or purge. This is a personal forensic tool, not a monitor. There is no one to report to but you.
+No account. No cloud. No sync. No analytics or telemetry. It never stores typed text, screenshots, the clipboard, packet contents, or full URLs by default — only local metadata, in one SQLite file on your disk that you can inspect or purge.
 
 <p align="center">
   <img src="docs/img/trace-showcase.png" alt="Trace Showcase with sample Data" width="640"><br>
@@ -31,7 +31,7 @@ The database lives in the local OS app-data dir — `%LOCALAPPDATA%/org.lambdaf.
 
 ### macOS permissions
 
-macOS gates the signals Trace reads behind per-app permissions (System Settings → Privacy & Security). Each is requested on first use and Trace degrades gracefully if denied — it simply omits that one signal:
+macOS gates the signals Trace reads behind per-app permissions (System Settings → Privacy & Security). Each is requested on first use and Trace degrades gracefully if denied (this can cause issues) — it simply omits that one signal:
 
 - **Accessibility** — required for window titles (when enabled) and to count keystrokes/clicks. Without it, app + duration are still recorded.
 - **Input Monitoring** — may also be requested for the global keyboard/mouse counters.
